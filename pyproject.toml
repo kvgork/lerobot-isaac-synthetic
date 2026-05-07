@@ -11,8 +11,8 @@ dependencies = [
     "pyarrow>=14.0",
     "pandas>=2.0",
     "numpy>=1.24",
-    # quality_hook.py delegates to lerobot_isaac_adapters.quality (sibling package)
-    "lerobot-isaac-adapters",
+    # NOTE: sibling `lerobot-isaac-adapters` is NOT listed — pixi installs it as editable
+    # workspace dep via root pixi.toml pypi-dependencies. See [monorepo] extra.
 ]
 
 [project.optional-dependencies]
@@ -20,6 +20,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov",
 ]
+monorepo = ["lerobot-isaac-adapters"]
 
 [build-system]
 requires = ["hatchling"]
