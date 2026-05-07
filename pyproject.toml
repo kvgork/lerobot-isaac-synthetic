@@ -11,6 +11,8 @@ dependencies = [
     "pyarrow>=14.0",
     "pandas>=2.0",
     "numpy>=1.24",
+    # quality_hook.py delegates to lerobot_isaac_adapters.quality (sibling package)
+    "lerobot-isaac-adapters",
 ]
 
 [project.optional-dependencies]
