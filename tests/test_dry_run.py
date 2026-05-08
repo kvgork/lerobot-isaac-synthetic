@@ -16,6 +16,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _run_main(argv: list, replay_runner_mod) -> str:
     """Invoke replay_runner.main() with patched sys.argv; return captured stdout."""
     old_argv = sys.argv[:]
@@ -30,6 +31,7 @@ def _run_main(argv: list, replay_runner_mod) -> str:
 # --dry_run tests (no lerobot/isaaclab needed)
 # ---------------------------------------------------------------------------
 
+
 def test_dry_run_returns_without_error(tmp_path, capsys):
     """--dry_run exits cleanly (return code 0 = no exception)."""
     from lerobot_isaac_synthetic.isaac_dr import replay_runner
@@ -38,7 +40,8 @@ def test_dry_run_returns_without_error(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
+            "--source_dataset",
+            str(fake_src),
             "--dry_run",
         ],
         replay_runner,
@@ -54,7 +57,8 @@ def test_dry_run_prints_source_dataset(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
+            "--source_dataset",
+            str(fake_src),
             "--dry_run",
         ],
         replay_runner,
@@ -71,8 +75,10 @@ def test_dry_run_prints_n_variants(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
-            "--n_variants", "7",
+            "--source_dataset",
+            str(fake_src),
+            "--n_variants",
+            "7",
             "--dry_run",
         ],
         replay_runner,
@@ -89,8 +95,10 @@ def test_dry_run_prints_task(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
-            "--task", "stack",
+            "--source_dataset",
+            str(fake_src),
+            "--task",
+            "stack",
             "--dry_run",
         ],
         replay_runner,
@@ -107,7 +115,8 @@ def test_dry_run_default_output_path_contains_timestamp(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
+            "--source_dataset",
+            str(fake_src),
             "--dry_run",
         ],
         replay_runner,
@@ -125,8 +134,10 @@ def test_dry_run_explicit_output_path(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
-            "--output_path", str(fake_out),
+            "--source_dataset",
+            str(fake_src),
+            "--output_path",
+            str(fake_out),
             "--dry_run",
         ],
         replay_runner,
@@ -143,8 +154,10 @@ def test_dry_run_seed_propagated(tmp_path, capsys):
     _run_main(
         [
             "replay_runner",
-            "--source_dataset", str(fake_src),
-            "--seed", "42",
+            "--source_dataset",
+            str(fake_src),
+            "--seed",
+            "42",
             "--dry_run",
         ],
         replay_runner,
@@ -155,7 +168,6 @@ def test_dry_run_seed_propagated(tmp_path, capsys):
 
 def test_dry_run_does_not_import_lerobot(tmp_path, monkeypatch):
     """--dry_run must NOT trigger lerobot/gymnasium imports."""
-    import importlib
     import sys as _sys
 
     from lerobot_isaac_synthetic.isaac_dr import replay_runner
@@ -163,9 +175,8 @@ def test_dry_run_does_not_import_lerobot(tmp_path, monkeypatch):
     # Track import attempts for lerobot / gymnasium / lerobot_isaac_env
     imported = []
 
-    original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else None
-
     import builtins
+
     real_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):
@@ -179,7 +190,8 @@ def test_dry_run_does_not_import_lerobot(tmp_path, monkeypatch):
     old_argv = _sys.argv[:]
     _sys.argv = [
         "replay_runner",
-        "--source_dataset", str(fake_src),
+        "--source_dataset",
+        str(fake_src),
         "--dry_run",
     ]
     try:
@@ -196,6 +208,7 @@ def test_dry_run_does_not_import_lerobot(tmp_path, monkeypatch):
 # Non-dry-run guard: ensures ImportError (not NIE) when lerobot missing
 # ---------------------------------------------------------------------------
 
+
 def test_full_run_raises_import_error_not_not_implemented(tmp_path):
     """Without --dry_run, main() triggers replay which raises ImportError."""
     import sys as _sys
@@ -207,8 +220,10 @@ def test_full_run_raises_import_error_not_not_implemented(tmp_path):
     old_argv = _sys.argv[:]
     _sys.argv = [
         "replay_runner",
-        "--source_dataset", str(fake_src),
-        "--output_path", str(fake_out),
+        "--source_dataset",
+        str(fake_src),
+        "--output_path",
+        str(fake_out),
     ]
     try:
         with pytest.raises(ImportError):

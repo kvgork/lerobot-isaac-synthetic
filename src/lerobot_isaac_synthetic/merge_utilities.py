@@ -40,16 +40,18 @@ Usage
 from __future__ import annotations
 
 import logging
-import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 def merge_datasets(
     real_path: str | Path,
-    sim_paths: List[str | Path],
+    sim_paths: list[str | Path],
     output_path: str | Path,
     sim_weight: float = 0.5,
     dedup: bool = True,
@@ -93,18 +95,14 @@ def merge_datasets(
         If lerobot, pandas, or pyarrow are not installed.
     """
     if not (0.0 < sim_weight < 1.0):
-        raise ValueError(
-            f"sim_weight must be in (0.0, 1.0), got {sim_weight!r}"
-        )
+        raise ValueError(f"sim_weight must be in (0.0, 1.0), got {sim_weight!r}")
 
     # --- Lazy imports --------------------------------------------------------
     try:
         import pandas as pd
-        import pyarrow.parquet as pq
-        import shutil
     except ImportError as exc:
         raise ImportError(
-            "pandas and pyarrow are required for merge_datasets.  "
+            "pandas is required for merge_datasets.  "
             "Install with:  pip install pandas pyarrow\n"
             "or activate the workspace pixi env:  pixi shell"
         ) from exc
@@ -127,13 +125,15 @@ def merge_datasets(
     n_real = len(real_episodes_df)
     logger.info("Real dataset: %d episodes from %s", n_real, real_path)
 
-    sim_dfs: List[pd.DataFrame] = []
+    sim_dfs: list[pd.DataFrame] = []
     for sp in sim_paths:
         df = _load_episodes_df(sp, default_source="sim_dr")
         sim_dfs.append(df)
         logger.info(
             "Sim dataset: %d episodes from %s (source=%s)",
-            len(df), sp, df["source"].iloc[0] if len(df) > 0 else "unknown",
+            len(df),
+            sp,
+            df["source"].iloc[0] if len(df) > 0 else "unknown",
         )
 
     all_sim_df = pd.concat(sim_dfs, ignore_index=True) if sim_dfs else pd.DataFrame()
@@ -141,10 +141,13 @@ def merge_datasets(
 
     # --- Deduplication -------------------------------------------------------
     if dedup and n_sim_available > 0:
-        all_sim_df = _dedup_against_real(real_episodes_df, all_sim_df, real_path, sim_paths)
+        all_sim_df = _dedup_against_real(
+            real_episodes_df, all_sim_df, real_path, sim_paths
+        )
         logger.info(
             "After dedup: %d sim episodes remain (dropped %d)",
-            len(all_sim_df), n_sim_available - len(all_sim_df),
+            len(all_sim_df),
+            n_sim_available - len(all_sim_df),
         )
 
     # --- Balanced sampling ---------------------------------------------------
@@ -153,13 +156,17 @@ def merge_datasets(
     n_sim_available = len(all_sim_df)
 
     if n_sim_available > n_sim_target:
-        all_sim_df = all_sim_df.sample(n=n_sim_target, random_state=0).reset_index(drop=True)
+        all_sim_df = all_sim_df.sample(n=n_sim_target, random_state=0).reset_index(
+            drop=True
+        )
         logger.info("Down-sampled sim pool to %d episodes.", n_sim_target)
     elif n_real > 0 and n_sim_available < n_sim_target:
         logger.warning(
             "Fewer sim episodes available (%d) than target (%d); "
             "merged dataset will be more real-heavy than sim_weight=%.2f implies.",
-            n_sim_available, n_sim_target, sim_weight,
+            n_sim_available,
+            n_sim_target,
+            sim_weight,
         )
 
     # --- Combine and re-index ------------------------------------------------
@@ -183,7 +190,10 @@ def merge_datasets(
 
     logger.info(
         "Merged dataset written to %s (%d total episodes: %d real + %d sim)",
-        output_path, len(merged_df), n_real, len(all_sim_df),
+        output_path,
+        len(merged_df),
+        n_real,
+        len(all_sim_df),
     )
     return output_path
 
@@ -192,7 +202,8 @@ def merge_datasets(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _load_episodes_df(dataset_path: Path, default_source: str) -> "pd.DataFrame":
+
+def _load_episodes_df(dataset_path: Path, default_source: str) -> pd.DataFrame:
     """Load ``meta/episodes.parquet`` into a DataFrame, adding source if absent."""
     import pandas as pd
 
@@ -202,7 +213,9 @@ def _load_episodes_df(dataset_path: Path, default_source: str) -> "pd.DataFrame"
             "meta/episodes.parquet not found at %s — treating as empty dataset.",
             dataset_path,
         )
-        return pd.DataFrame(columns=["episode_index", "length", "tasks_index", "source"])
+        return pd.DataFrame(
+            columns=["episode_index", "length", "tasks_index", "source"]
+        )
 
     df = pd.read_parquet(episodes_file)
     if "source" not in df.columns:
@@ -212,28 +225,27 @@ def _load_episodes_df(dataset_path: Path, default_source: str) -> "pd.DataFrame"
 
 
 def _dedup_against_real(
-    real_df: "pd.DataFrame",
-    sim_df: "pd.DataFrame",
+    real_df: pd.DataFrame,
+    sim_df: pd.DataFrame,
     real_path: Path,
-    sim_paths: List[Path],
-) -> "pd.DataFrame":
+    sim_paths: list[Path],
+) -> pd.DataFrame:
     """Drop sim episodes whose first-frame state hash matches a real episode."""
+    del sim_paths  # accepted for API symmetry; episode dataset path is on each row
     real_hashes = _compute_first_frame_hashes(real_df, real_path)
     if not real_hashes:
         return sim_df
 
-    path_to_sim: Dict[str, Path] = {str(p): p for p in sim_paths}
     mask = []
     for _, row in sim_df.iterrows():
         ds_path = Path(row["_dataset_path"])
         h = _compute_episode_hash(ds_path, int(row["episode_index"]))
         mask.append(h not in real_hashes)
 
-    import pandas as pd
     return sim_df[mask].reset_index(drop=True)
 
 
-def _compute_first_frame_hashes(df: "pd.DataFrame", dataset_path: Path) -> set:
+def _compute_first_frame_hashes(df: pd.DataFrame, dataset_path: Path) -> set:
     """Return set of first-frame state hashes for all episodes in df."""
     hashes = set()
     for _, row in df.iterrows():
@@ -243,10 +255,11 @@ def _compute_first_frame_hashes(df: "pd.DataFrame", dataset_path: Path) -> set:
     return hashes
 
 
-def _compute_episode_hash(dataset_path: Path, episode_index: int) -> Optional[int]:
+def _compute_episode_hash(dataset_path: Path, episode_index: int) -> int | None:
     """Hash the first ``observation.state`` frame of a given episode."""
     try:
         import pandas as pd
+
         # Find the parquet file for this episode (LeRobot v3.0 layout)
         chunk = episode_index // 1000
         frame_file = (
@@ -267,16 +280,15 @@ def _compute_episode_hash(dataset_path: Path, episode_index: int) -> Optional[in
 
 
 def _copy_and_reindex_episodes(
-    merged_df: "pd.DataFrame",
+    merged_df: pd.DataFrame,
     real_path: Path,
-    sim_paths: List[Path],
+    sim_paths: list[Path],
     output_path: Path,
     fps: int,
     task_name: str,
 ) -> None:
     """Copy episode Parquet files to output_path, rewriting episode_index."""
     import pandas as pd
-    import shutil
 
     meta_dir = output_path / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
@@ -286,7 +298,11 @@ def _copy_and_reindex_episodes(
 
     for new_idx, row in merged_df.iterrows():
         src_path = Path(row["_dataset_path"])
-        orig_idx = int(row["episode_index"]) if "_dataset_path" in row.index and row["_dataset_path"] else new_idx
+        orig_idx = (
+            int(row["episode_index"])
+            if "_dataset_path" in row.index and row["_dataset_path"]
+            else new_idx
+        )
         source = row.get("source", "unknown")
 
         chunk = int(new_idx) // 1000
@@ -298,7 +314,9 @@ def _copy_and_reindex_episodes(
         # Locate source episode file
         src_chunk = orig_idx // 1000
         src_file = (
-            src_path / "data" / f"chunk-{src_chunk:03d}"
+            src_path
+            / "data"
+            / f"chunk-{src_chunk:03d}"
             / f"episode_{orig_idx:06d}.parquet"
         )
 
@@ -309,28 +327,25 @@ def _copy_and_reindex_episodes(
             ep_df.to_parquet(out_file, index=False)
             episode_len = len(ep_df)
         else:
-            logger.warning(
-                "Source episode file not found: %s — skipping.", src_file
-            )
+            logger.warning("Source episode file not found: %s — skipping.", src_file)
             episode_len = 0
 
-        episodes_rows.append({
-            "episode_index": int(new_idx),
-            "length": episode_len,
-            "tasks_index": 0,
-            "source": source,
-        })
+        episodes_rows.append(
+            {
+                "episode_index": int(new_idx),
+                "length": episode_len,
+                "tasks_index": 0,
+                "source": source,
+            }
+        )
 
     # Write meta files
-    pd.DataFrame(episodes_rows).to_parquet(
-        meta_dir / "episodes.parquet", index=False
-    )
-    pd.DataFrame(tasks_rows).to_parquet(
-        meta_dir / "tasks.parquet", index=False
-    )
+    pd.DataFrame(episodes_rows).to_parquet(meta_dir / "episodes.parquet", index=False)
+    pd.DataFrame(tasks_rows).to_parquet(meta_dir / "tasks.parquet", index=False)
 
     # Write minimal info.json
     import json
+
     info = {
         "fps": fps,
         "total_episodes": len(episodes_rows),

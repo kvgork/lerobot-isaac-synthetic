@@ -36,7 +36,8 @@ import argparse
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
+from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +73,23 @@ class Episode:
     episode_index: int = 0
     source_episode_index: int = 0
     dr_seed: int = 0
-    observations: List[Dict[str, Any]] = field(default_factory=list)
-    actions: List[Any] = field(default_factory=list)
+    observations: list[dict[str, Any]] = field(default_factory=list)
+    actions: list[Any] = field(default_factory=list)
     success: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def replay_with_randomization(
     source_dataset_path: str | Path,
     n_variants_per_episode: int = 5,
-    dr_config: Optional[Dict[str, Any]] = None,
+    dr_config: dict[str, Any] | None = None,
     task: str = "pick",
-    output_path: Optional[str | Path] = None,
+    output_path: str | Path | None = None,
     seed: int = 0,
     # Legacy / compatibility aliases kept for back-compat with old callers
     env_id: str = "Isaac-SO101-PickPlace-v0",
-    max_episodes: Optional[int] = None,
-    base_seed: Optional[int] = None,
+    max_episodes: int | None = None,
+    base_seed: int | None = None,
 ) -> Iterator[Episode]:
     """Replay source episodes through an Isaac Lab DR environment.
 
@@ -184,18 +185,14 @@ def replay_with_randomization(
 
     # All imports succeeded — run the actual replay loop.
     source_dataset_path = Path(source_dataset_path)
-    logger.info(
-        "Loading source dataset from %s", source_dataset_path
-    )
+    logger.info("Loading source dataset from %s", source_dataset_path)
     dataset = LeRobotDataset(str(source_dataset_path))
 
     n_source = len(dataset.episode_data_index["from"])
     if max_episodes is not None:
         n_source = min(n_source, max_episodes)
 
-    logger.info(
-        "Creating env %s (headless)", env_id
-    )
+    logger.info("Creating env %s (headless)", env_id)
     env = gym.make(env_id, headless=True)
 
     # Apply DR config overrides before first reset
@@ -230,9 +227,7 @@ def replay_with_randomization(
                     if done:
                         break
 
-                success = bool(
-                    info.get("episode", {}).get("is_success", False)
-                )
+                success = bool(info.get("episode", {}).get("is_success", False))
                 yield Episode(
                     episode_index=episode_counter,
                     source_episode_index=ep_idx,
@@ -247,7 +242,7 @@ def replay_with_randomization(
         env.close()
 
 
-def _apply_dr_config(env: Any, dr_config: Dict[str, Any]) -> None:
+def _apply_dr_config(env: Any, dr_config: dict[str, Any]) -> None:
     """Apply DR parameter overrides to ``env.cfg.events``.
 
     Isaac Lab's ``EventManager`` reads configuration values from
@@ -313,6 +308,7 @@ def _apply_dr_config(env: Any, dr_config: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # CLI entry-point
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -388,11 +384,12 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _resolve_output_path(output_path: Optional[Path]) -> Path:
+def _resolve_output_path(output_path: Path | None) -> Path:
     """Return resolved output path, generating a timestamped default if needed."""
     if output_path is not None:
         return output_path
     from datetime import datetime
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Path(f"datasets/dr_replay_{ts}")
 

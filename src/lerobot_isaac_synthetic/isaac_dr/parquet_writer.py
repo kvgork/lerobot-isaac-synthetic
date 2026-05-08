@@ -50,19 +50,30 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
+from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
 # Standard SO-101 feature definition used when no features dict is provided.
-_DEFAULT_SO101_FEATURES: Dict[str, Any] = {
+_DEFAULT_SO101_FEATURES: dict[str, Any] = {
     "observation.state": {
         "dtype": "float32",
         "shape": (12,),
-        "names": ["joint_pos_0", "joint_pos_1", "joint_pos_2",
-                  "joint_pos_3", "joint_pos_4", "joint_pos_5",
-                  "joint_vel_0", "joint_vel_1", "joint_vel_2",
-                  "joint_vel_3", "joint_vel_4", "joint_vel_5"],
+        "names": [
+            "joint_pos_0",
+            "joint_pos_1",
+            "joint_pos_2",
+            "joint_pos_3",
+            "joint_pos_4",
+            "joint_pos_5",
+            "joint_vel_0",
+            "joint_vel_1",
+            "joint_vel_2",
+            "joint_vel_3",
+            "joint_vel_4",
+            "joint_vel_5",
+        ],
     },
     "observation.images.wrist": {
         "dtype": "video",
@@ -91,8 +102,7 @@ _DEFAULT_SO101_FEATURES: Dict[str, Any] = {
     "action": {
         "dtype": "float32",
         "shape": (6,),
-        "names": ["joint_0", "joint_1", "joint_2",
-                  "joint_3", "joint_4", "joint_5"],
+        "names": ["joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5"],
     },
     "next.done": {
         "dtype": "bool",
@@ -102,7 +112,7 @@ _DEFAULT_SO101_FEATURES: Dict[str, Any] = {
 }
 
 
-def _derive_features_from_episode(episode: Any) -> Dict[str, Any]:
+def _derive_features_from_episode(episode: Any) -> dict[str, Any]:
     """Attempt to derive a features dict from the first episode's shapes.
 
     Falls back to the standard SO-101 feature dict if shapes cannot be
@@ -115,11 +125,12 @@ def _derive_features_from_episode(episode: Any) -> Dict[str, Any]:
         return dict(_DEFAULT_SO101_FEATURES)
 
     first_obs = episode.observations[0]
-    features: Dict[str, Any] = {}
+    features: dict[str, Any] = {}
 
     for key, value in first_obs.items():
         try:
             import numpy as np
+
             arr = np.asarray(value)
             if arr.ndim == 3 and arr.shape[-1] == 3:
                 # Image — record as video feature
@@ -149,6 +160,7 @@ def _derive_features_from_episode(episode: Any) -> Dict[str, Any]:
     if episode.actions:
         try:
             import numpy as np
+
             action_arr = np.asarray(episode.actions[0])
             features["action"] = {
                 "dtype": str(action_arr.dtype),
@@ -170,7 +182,7 @@ def write_episodes_to_lerobot_dataset(
     source_tag: str = "sim_dr",
     task_name: str = "pick_and_place",
     fps: int = 30,
-    features: Optional[Dict[str, Any]] = None,
+    features: dict[str, Any] | None = None,
     image_writer_threads: int = 4,
 ) -> Path:
     """Write synthetic episodes to a LeRobotDataset-compatible Parquet directory.
@@ -228,7 +240,9 @@ def write_episodes_to_lerobot_dataset(
 
     logger.info(
         "Creating LeRobotDataset at %s (repo_id=%s, fps=%d)",
-        output_path, repo_id, fps,
+        output_path,
+        repo_id,
+        fps,
     )
     dataset = LeRobotDataset.create(
         repo_id=repo_id,
@@ -238,16 +252,17 @@ def write_episodes_to_lerobot_dataset(
         image_writer_threads=image_writer_threads,
     )
 
-    task_index = dataset.meta.tasks  # mapping task_name -> tasks_index (v3.0 API)
+    # dataset.meta.tasks (mapping task_name -> tasks_index, v3.0 API) is read
+    # automatically by add_frame() based on the task argument.
 
     for ep in episode_list:
         n_frames = len(ep.actions)
         for t in range(n_frames):
             obs = ep.observations[t] if t < len(ep.observations) else {}
             action = ep.actions[t]
-            done = (t == n_frames - 1)
+            done = t == n_frames - 1
 
-            frame: Dict[str, Any] = {}
+            frame: dict[str, Any] = {}
             for key, value in obs.items():
                 frame[key] = value
             frame["action"] = action

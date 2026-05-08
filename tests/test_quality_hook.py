@@ -26,6 +26,7 @@ import pytest
 # Import smoke
 # ---------------------------------------------------------------------------
 
+
 class TestImport:
     def test_module_importable(self):
         """quality_hook module imports without error."""
@@ -33,6 +34,7 @@ class TestImport:
 
     def test_filter_after_replay_importable(self):
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
+
         assert callable(filter_after_replay)
 
 
@@ -40,14 +42,17 @@ class TestImport:
 # Signature
 # ---------------------------------------------------------------------------
 
+
 class TestSignature:
     def test_has_replayed_dataset_path(self):
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
+
         sig = signature(filter_after_replay)
         assert "replayed_dataset_path" in sig.parameters
 
     def test_defaults_match_spec(self):
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
+
         sig = signature(filter_after_replay)
         params = sig.parameters
         assert params["sal_threshold"].default == pytest.approx(0.2)
@@ -56,6 +61,7 @@ class TestSignature:
 
     def test_returns_path_annotation(self):
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
+
         sig = signature(filter_after_replay)
         # return annotation is Path (or not set — both acceptable)
         # Just verify the function is callable with correct params
@@ -65,6 +71,7 @@ class TestSignature:
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
+
 
 class TestHappyPath:
     def test_returns_path(self, tmp_path: Path):
@@ -79,7 +86,10 @@ class TestHappyPath:
         mock_result.success = True
         mock_result.data = {"kept": 8, "removed": 2}
 
-        with patch("lerobot_isaac_adapters.quality.apply_quality_filter", return_value=mock_result):
+        with patch(
+            "lerobot_isaac_adapters.quality.apply_quality_filter",
+            return_value=mock_result,
+        ):
             result_path = filter_after_replay(
                 replayed_dataset_path=ds,
                 output_path=output,
@@ -98,7 +108,10 @@ class TestHappyPath:
         mock_result.success = True
         mock_result.data = {}
 
-        with patch("lerobot_isaac_adapters.quality.apply_quality_filter", return_value=mock_result) as mock_fn:
+        with patch(
+            "lerobot_isaac_adapters.quality.apply_quality_filter",
+            return_value=mock_result,
+        ) as mock_fn:
             result_path = filter_after_replay(replayed_dataset_path=ds)
 
         # output_path kwarg passed to apply_quality_filter should be <ds>_filtered
@@ -117,7 +130,10 @@ class TestHappyPath:
         mock_result.success = True
         mock_result.data = {}
 
-        with patch("lerobot_isaac_adapters.quality.apply_quality_filter", return_value=mock_result) as mock_fn:
+        with patch(
+            "lerobot_isaac_adapters.quality.apply_quality_filter",
+            return_value=mock_result,
+        ) as mock_fn:
             filter_after_replay(
                 replayed_dataset_path=ds,
                 sal_threshold=0.3,
@@ -135,6 +151,7 @@ class TestHappyPath:
 # Error path
 # ---------------------------------------------------------------------------
 
+
 class TestErrorPath:
     def test_raises_runtime_error_on_failure(self, tmp_path: Path):
         """RuntimeError is raised when apply_quality_filter returns success=False."""
@@ -148,7 +165,10 @@ class TestErrorPath:
         mock_result.error = "skill not found"
         mock_result.suggestions = ["check path"]
 
-        with patch("lerobot_isaac_adapters.quality.apply_quality_filter", return_value=mock_result):
+        with patch(
+            "lerobot_isaac_adapters.quality.apply_quality_filter",
+            return_value=mock_result,
+        ):
             with pytest.raises(RuntimeError, match="skill not found"):
                 filter_after_replay(replayed_dataset_path=ds)
 
@@ -169,6 +189,7 @@ class TestErrorPath:
 
         # Block the import
         import builtins
+
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):

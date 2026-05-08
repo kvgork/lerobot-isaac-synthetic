@@ -61,14 +61,12 @@ from __future__ import annotations
 import os
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _ENABLED_ENV_VAR = "LEROBOT_MIMICGEN_ENABLED"
-_SKILL_PATH = (
-    "/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md"
-)
+_SKILL_PATH = "/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md"
 _AGENT_PATH = (
     "/home/koen/tools/claude_code/agents/workers/lerobot-sim-augmentation-agent.md"
 )
@@ -83,7 +81,7 @@ def _check_enabled() -> bool:
 def run_mimicgen(
     real_dataset_path: str | Path,
     n_synthetic_demos: int,
-    task_config: str | Dict[str, Any],
+    task_config: str | dict[str, Any],
     output_path: str | Path,
     enabled: bool = False,
 ) -> Path:

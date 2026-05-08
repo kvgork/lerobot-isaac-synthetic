@@ -18,6 +18,7 @@ def test_top_level_import():
 def test_version_attribute():
     """Package exposes a __version__ string."""
     import lerobot_isaac_synthetic
+
     assert isinstance(lerobot_isaac_synthetic.__version__, str)
     assert len(lerobot_isaac_synthetic.__version__) > 0
 
@@ -55,6 +56,7 @@ def test_merge_utilities_import():
 def test_episode_dataclass_importable():
     """Episode dataclass is accessible from replay_runner."""
     from lerobot_isaac_synthetic.isaac_dr.replay_runner import Episode
+
     assert Episode is not None
 
 
@@ -70,7 +72,6 @@ def test_no_lerobot_required_at_import():
         return
 
     # Re-import to trigger any top-level lerobot imports (none expected)
-    import importlib
     for mod_name in [
         "lerobot_isaac_synthetic",
         "lerobot_isaac_synthetic.isaac_dr",

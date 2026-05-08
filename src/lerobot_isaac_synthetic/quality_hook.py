@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ def filter_after_replay(
     sal_threshold: float = 0.2,
     ted_threshold: float = 2.0,
     min_episode_length: int = 50,
-    output_path: Optional[str | Path] = None,
+    output_path: str | Path | None = None,
     dry_run: bool = False,
 ) -> Path:
     """Apply quality filtering to a replayed (synthetic) LeRobotDataset.
