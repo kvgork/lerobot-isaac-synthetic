@@ -65,7 +65,7 @@ def filter_after_replay(
     --------------------------------
     This function delegates to lerobot_isaac_adapters.quality.apply_quality_filter,
     which bridges to:
-        /home/koen/tools/claude_code/skills/lerobot_dataset_quality/
+        ${CLAUDE_CODE_ROOT}/skills/lerobot_dataset_quality/
     Override the skill root via: export LEROBOT_CLAUDE_CODE_ROOT=/path/to/claude_code
     """
     # Soft-import to avoid circular/hard dependency;

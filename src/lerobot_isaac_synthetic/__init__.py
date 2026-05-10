@@ -35,9 +35,9 @@ Quick-start (Isaac Lab DR path)
 >>> write_episodes_to_lerobot_dataset(episodes, output_path="/data/synthetic_dr")
 
 Skill reference:
-  /home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md
+  ${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md
 Agent reference:
-  /home/koen/tools/claude_code/agents/workers/lerobot-sim-augmentation-agent.md
+  ${CLAUDE_CODE_ROOT}/agents/workers/lerobot-sim-augmentation-agent.md
 """
 
 __version__ = "0.1.0"

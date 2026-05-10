@@ -130,7 +130,7 @@ See `../../docs/ARCHITECTURE.md` (spinout section).
 
 ## Source-of-Truth Pointers
 
-- Build plan: `/home/koen/tools/claude_code/plans/2026-05-06-lerobot-isaac-workspace-plan.md` — Phase 4
-- MimicGen skill: `/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md`
-- Augmentation agent: `/home/koen/tools/claude_code/agents/workers/lerobot-sim-augmentation-agent.md`
-- Dataset quality skill: `/home/koen/tools/claude_code/skills/lerobot_dataset_quality/SKILL.md`
+- Build plan: `${CLAUDE_CODE_ROOT}/plans/2026-05-06-lerobot-isaac-workspace-plan.md` — Phase 4
+- MimicGen skill: `${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md`
+- Augmentation agent: `${CLAUDE_CODE_ROOT}/agents/workers/lerobot-sim-augmentation-agent.md`
+- Dataset quality skill: `${CLAUDE_CODE_ROOT}/skills/lerobot_dataset_quality/SKILL.md`

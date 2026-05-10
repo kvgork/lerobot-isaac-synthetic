@@ -15,10 +15,10 @@ Set the environment variable ``LEROBOT_MIMICGEN_ENABLED=1`` or pass
 all functions raise ``NotImplementedError`` pointing to the skill and agent.
 
 Skill reference (conversion, full implementation):
-  /home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md
+  ${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md
 
 Agent reference (full pipeline orchestration):
-  /home/koen/tools/claude_code/agents/workers/lerobot-sim-augmentation-agent.md
+  ${CLAUDE_CODE_ROOT}/agents/workers/lerobot-sim-augmentation-agent.md
 
 Deferred-path note:
   The blocker for this path is that MimicGen v1.x only supports robosuite/MuJoCo

@@ -96,8 +96,8 @@ To enable: set `LEROBOT_MIMICGEN_ENABLED=1` AND install MimicGen + robosuite,
 then implement the stub body. Recommended: invoke via `lerobot-sim-augmentation-agent`
 for full pipeline with error recovery.
 
-Skill reference: `/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md`
-Agent reference: `/home/koen/tools/claude_code/agents/workers/lerobot-sim-augmentation-agent.md`
+Skill reference: `${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md`
+Agent reference: `${CLAUDE_CODE_ROOT}/agents/workers/lerobot-sim-augmentation-agent.md`
 
 ---
 

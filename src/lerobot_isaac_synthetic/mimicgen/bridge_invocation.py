@@ -40,7 +40,7 @@ validation:
     })
 
 Skill reference (conversion only — no MimicGen orchestration):
-  /home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md
+  ${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md
 
 Usage (deferred stub)
 ---------------------
@@ -66,9 +66,11 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _ENABLED_ENV_VAR = "LEROBOT_MIMICGEN_ENABLED"
-_SKILL_PATH = "/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md"
-_AGENT_PATH = (
-    "/home/koen/tools/claude_code/agents/workers/lerobot-sim-augmentation-agent.md"
+_SKILL_PATH = os.path.expandvars(
+    "${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md"
+)
+_AGENT_PATH = os.path.expandvars(
+    "${CLAUDE_CODE_ROOT}/agents/workers/lerobot-sim-augmentation-agent.md"
 )
 _DR_MODULE = "lerobot_isaac_synthetic.isaac_dr.replay_runner"
 
@@ -179,7 +181,7 @@ def convert_real_to_mimicgen_hdf5(
     """Convert a real LeRobotDataset to MimicGen HDF5 format.
 
     Thin delegation to the ``lerobot_mimicgen_bridge`` skill.  See skill docs:
-    ``/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md``
+    ``${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md``
 
     Priority alternative: use ``isaac_dr.replay_runner.replay_with_randomization``
     for Isaac Lab DR-based augmentation, which does not require MimicGen or MuJoCo.
@@ -206,7 +208,7 @@ def convert_mimicgen_hdf5_to_lerobot(
     """Convert MimicGen output HDF5 back to LeRobotDataset Parquet format.
 
     Thin delegation to the ``lerobot_mimicgen_bridge`` skill.  See skill docs:
-    ``/home/koen/tools/claude_code/skills/lerobot_mimicgen_bridge/SKILL.md``
+    ``${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md``
 
     Priority alternative: use ``isaac_dr.parquet_writer.write_episodes_to_lerobot_dataset``
     for writing episodes produced by the Isaac Lab DR pipeline.
