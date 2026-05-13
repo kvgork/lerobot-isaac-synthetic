@@ -31,3 +31,6 @@ packages = ["src/lerobot_isaac_synthetic"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "requires_workspace_root: marks tests that require the monorepo workspace layout (sibling packages, workspace pyproject.toml). Auto-skipped when run from a standalone spun-out tree.",
+]

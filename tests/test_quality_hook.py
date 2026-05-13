@@ -74,6 +74,7 @@ class TestSignature:
 
 
 class TestHappyPath:
+    @pytest.mark.requires_workspace_root
     def test_returns_path(self, tmp_path: Path):
         """filter_after_replay returns a Path object on success."""
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
@@ -97,6 +98,7 @@ class TestHappyPath:
 
         assert isinstance(result_path, Path)
 
+    @pytest.mark.requires_workspace_root
     def test_output_path_default_is_filtered_suffix(self, tmp_path: Path):
         """Default output path is <input>_filtered."""
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
@@ -119,6 +121,7 @@ class TestHappyPath:
         passed_output = Path(call_kwargs.get("output_path", result_path))
         assert "_filtered" in str(passed_output)
 
+    @pytest.mark.requires_workspace_root
     def test_kwargs_forwarded(self, tmp_path: Path):
         """sal_threshold, ted_threshold, min_episode_length are forwarded."""
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
@@ -153,6 +156,7 @@ class TestHappyPath:
 
 
 class TestErrorPath:
+    @pytest.mark.requires_workspace_root
     def test_raises_runtime_error_on_failure(self, tmp_path: Path):
         """RuntimeError is raised when apply_quality_filter returns success=False."""
         from lerobot_isaac_synthetic.quality_hook import filter_after_replay
