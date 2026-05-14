@@ -273,12 +273,34 @@ def replay_with_randomization(
 
                 done = False
                 step_idx = 0
+                # Isaac Lab env.step expects (num_envs, action_dim) — our
+                # source dataset rows are 1-D (action_dim,). Add a batch dim
+                # at step time and use torch tensors on the env device.
+                import torch as _torch
+
                 while step_idx < len(actions_seq):
-                    action = actions_seq[step_idx]
-                    obs, _reward, terminated, truncated, info = env.step(action)
+                    raw_action = actions_seq[step_idx]
+                    if isinstance(raw_action, _torch.Tensor):
+                        action_t = raw_action.detach().clone()
+                    else:
+                        action_t = _torch.as_tensor(raw_action)
+                    if action_t.ndim == 1:
+                        action_t = action_t.unsqueeze(0)
+                    action_t = action_t.to(
+                        getattr(env, "device", _torch.device("cpu")),
+                        dtype=_torch.float32,
+                    )
+                    obs, _reward, terminated, truncated, info = env.step(action_t)
                     obs_list.append(dict(obs) if not isinstance(obs, dict) else obs)
-                    action_list.append(action)
-                    done = terminated or truncated
+                    action_list.append(raw_action)
+                    # Isaac Lab returns (num_envs,)-shaped done flags.
+                    done_flag = bool(
+                        (terminated[0] if hasattr(terminated, "__getitem__")
+                         else terminated)
+                        or (truncated[0] if hasattr(truncated, "__getitem__")
+                            else truncated)
+                    )
+                    done = done_flag
                     step_idx += 1
                     if done:
                         break
