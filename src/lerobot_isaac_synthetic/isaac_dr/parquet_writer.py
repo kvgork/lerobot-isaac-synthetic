@@ -218,7 +218,7 @@ def write_episodes_to_lerobot_dataset(
         If lerobot is not installed.
     """
     try:
-        from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
     except ImportError as exc:
         raise ImportError(
             "LeRobot required to write Parquet — `pip install lerobot`\n"

@@ -108,7 +108,7 @@ def merge_datasets(
         ) from exc
 
     try:
-        from lerobot.common.datasets.lerobot_dataset import LeRobotDataset  # noqa: F401
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: F401
     except ImportError as exc:
         raise ImportError(
             "LeRobot required for merge_datasets.  "

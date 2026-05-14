@@ -98,7 +98,7 @@ def replay_with_randomization(
 
     Algorithm
     ---------
-    1. Soft-import ``lerobot.common.datasets.lerobot_dataset.LeRobotDataset``
+    1. Soft-import ``lerobot.datasets.lerobot_dataset.LeRobotDataset``
        and load ``source_dataset_path``.
     2. Soft-import ``gymnasium`` and call ``gym.make(env_id)`` (headless).
        The env is registered by the ``lerobot_isaac_env`` package.
@@ -158,7 +158,7 @@ def replay_with_randomization(
 
     # --- Lazy imports — raise ImportError with actionable messages ----------
     try:
-        from lerobot.common.datasets.lerobot_dataset import LeRobotDataset  # noqa: F401
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: F401
     except ImportError as exc:
         raise ImportError(
             "lerobot is required to load source datasets.  "
