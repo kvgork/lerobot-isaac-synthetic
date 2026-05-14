@@ -286,6 +286,13 @@ def write_episodes_to_lerobot_dataset(
         # save_episode commits the buffered frames + episode metadata.
         dataset.save_episode()
 
+    # lerobot 0.5 buffers data parquet writes — without finalize() the
+    # data/chunk-000/file-000.parquet ends mid-write (head=PAR1 but no
+    # footer magic bytes, breaking every reader). Call finalize() once
+    # after all episodes are committed to flush.
+    if hasattr(dataset, "finalize"):
+        dataset.finalize()
+
     # Append source tag to meta/episodes.parquet
     _tag_source_column(output_path, source_tag)
 
