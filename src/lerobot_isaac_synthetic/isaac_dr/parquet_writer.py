@@ -313,17 +313,30 @@ def _tag_source_column(output_path: Path, source_tag: str) -> None:
         )
         return
 
+    # lerobot 0.5 layouts: single `meta/episodes.parquet` (v2.x) OR sharded
+    # `meta/episodes/chunk-XXX/file-XXX.parquet` (v3.0). Try both.
     episodes_path = output_path / "meta" / "episodes.parquet"
-    if not episodes_path.exists():
+    shard_paths = sorted(
+        (output_path / "meta" / "episodes").glob("chunk-*/file-*.parquet")
+    )
+
+    targets: list[Path] = []
+    if episodes_path.exists():
+        targets.append(episodes_path)
+    targets.extend(shard_paths)
+
+    if not targets:
         logger.warning(
-            "meta/episodes.parquet not found at %s — source tag not written.",
+            "No meta/episodes parquet (single or sharded) at %s — "
+            "source tag not written.",
             output_path,
         )
         return
 
-    df = pd.read_parquet(episodes_path)
-    df["source"] = source_tag
-    df.to_parquet(episodes_path, index=False)
+    for p in targets:
+        df = pd.read_parquet(p)
+        df["source"] = source_tag
+        df.to_parquet(p, index=False)
 
     tasks_path = output_path / "meta" / "tasks.parquet"
     if tasks_path.exists():
