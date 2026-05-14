@@ -330,6 +330,17 @@ def _tag_source_column(output_path: Path, source_tag: str) -> None:
         # per-episode metadata lives in the data parquet's `episode_index`
         # column and in info.json's `total_episodes`. Synthesise a minimal
         # episodes.parquet here so dashboard loaders see the source breakdown.
+        #
+        # Read via pyarrow directly (env-local, no user-site override) and
+        # write via pyarrow to avoid pandas pulling a stale user-site pyarrow.
+        try:
+            import pyarrow as _pa
+            import pyarrow.parquet as _pq
+        except ImportError:
+            logger.warning(
+                "pyarrow not installed — cannot synthesise meta/episodes.parquet"
+            )
+            return
         try:
             data_parquet = next(
                 (output_path / "data").rglob("*.parquet"), None
@@ -342,18 +353,25 @@ def _tag_source_column(output_path: Path, source_tag: str) -> None:
                 output_path,
             )
             return
-        data_df = pd.read_parquet(data_parquet)
-        ep_lengths = (
-            data_df.groupby("episode_index").size().reset_index(name="length")
+        table = _pq.read_table(str(data_parquet), columns=["episode_index"])
+        ep_col = table.column("episode_index").to_pylist()
+        from collections import Counter as _Counter
+        counts = _Counter(int(e) for e in ep_col)
+        ep_indices = sorted(counts.keys())
+        synth_table = _pa.table(
+            {
+                "episode_index": ep_indices,
+                "length": [counts[i] for i in ep_indices],
+                "tasks_index": [0] * len(ep_indices),
+                "source": [source_tag] * len(ep_indices),
+            }
         )
-        ep_lengths["source"] = source_tag
-        ep_lengths["tasks_index"] = 0
         synth_path = output_path / "meta" / "episodes.parquet"
         synth_path.parent.mkdir(parents=True, exist_ok=True)
-        ep_lengths.to_parquet(synth_path, index=False)
+        _pq.write_table(synth_table, str(synth_path))
         logger.info(
             "Synthesised %d-episode meta/episodes.parquet from data shards",
-            len(ep_lengths),
+            len(ep_indices),
         )
     else:
         for p in targets:
