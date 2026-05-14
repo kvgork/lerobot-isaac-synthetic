@@ -186,7 +186,22 @@ def replay_with_randomization(
     # All imports succeeded — run the actual replay loop.
     source_dataset_path = Path(source_dataset_path)
     logger.info("Loading source dataset from %s", source_dataset_path)
-    dataset = LeRobotDataset(str(source_dataset_path))
+    # lerobot 0.5+ requires `repo_id` + `root` separately and treats a positional
+    # path as a repo_id (which it tries to hub-resolve, producing
+    # HFValidationError). For a local LeRobotDataset, derive a repo_id from the
+    # last two path components.
+    if source_dataset_path.is_dir():
+        parts = source_dataset_path.resolve().parts
+        repo_id = (
+            "/".join(parts[-2:]) if len(parts) >= 2 else source_dataset_path.name
+        )
+        dataset = LeRobotDataset(
+            repo_id=repo_id,
+            root=str(source_dataset_path),
+            video_backend="pyav",
+        )
+    else:
+        dataset = LeRobotDataset(repo_id=str(source_dataset_path))
 
     n_source = len(dataset.episode_data_index["from"])
     if max_episodes is not None:
