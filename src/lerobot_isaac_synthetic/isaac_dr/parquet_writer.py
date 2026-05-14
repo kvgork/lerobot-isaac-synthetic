@@ -274,10 +274,15 @@ def write_episodes_to_lerobot_dataset(
                 frame[key] = value
             frame["action"] = action
             frame["next.done"] = [done]
-            dataset.add_frame(frame)
+            # lerobot 0.5 requires each frame's dict to carry the task name
+            # — `add_frame(frame, task=...)` is the new signature. Pass it
+            # explicitly to avoid the "Missing features: {'task'}" error.
+            dataset.add_frame(frame, task=task_name)
 
-        # save_episode commits the buffered frames and writes episode metadata
-        dataset.save_episode(task=task_name)
+        # save_episode commits the buffered frames and writes episode metadata.
+        # In lerobot 0.5, `task` argument is required by add_frame() above; the
+        # save_episode() call no longer takes it.
+        dataset.save_episode()
 
     # Append source tag to meta/episodes.parquet
     _tag_source_column(output_path, source_tag)
