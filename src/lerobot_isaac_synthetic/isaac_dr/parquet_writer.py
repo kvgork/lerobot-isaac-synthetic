@@ -326,17 +326,40 @@ def _tag_source_column(output_path: Path, source_tag: str) -> None:
     targets.extend(shard_paths)
 
     if not targets:
-        logger.warning(
-            "No meta/episodes parquet (single or sharded) at %s — "
-            "source tag not written.",
-            output_path,
+        # lerobot 0.5 may not write any meta/episodes parquet at all — the
+        # per-episode metadata lives in the data parquet's `episode_index`
+        # column and in info.json's `total_episodes`. Synthesise a minimal
+        # episodes.parquet here so dashboard loaders see the source breakdown.
+        try:
+            data_parquet = next(
+                (output_path / "data").rglob("*.parquet"), None
+            )
+        except OSError:
+            data_parquet = None
+        if data_parquet is None:
+            logger.warning(
+                "No data parquet under %s/data — source tag not written.",
+                output_path,
+            )
+            return
+        data_df = pd.read_parquet(data_parquet)
+        ep_lengths = (
+            data_df.groupby("episode_index").size().reset_index(name="length")
         )
-        return
-
-    for p in targets:
-        df = pd.read_parquet(p)
-        df["source"] = source_tag
-        df.to_parquet(p, index=False)
+        ep_lengths["source"] = source_tag
+        ep_lengths["tasks_index"] = 0
+        synth_path = output_path / "meta" / "episodes.parquet"
+        synth_path.parent.mkdir(parents=True, exist_ok=True)
+        ep_lengths.to_parquet(synth_path, index=False)
+        logger.info(
+            "Synthesised %d-episode meta/episodes.parquet from data shards",
+            len(ep_lengths),
+        )
+    else:
+        for p in targets:
+            df = pd.read_parquet(p)
+            df["source"] = source_tag
+            df.to_parquet(p, index=False)
 
     tasks_path = output_path / "meta" / "tasks.parquet"
     if tasks_path.exists():
