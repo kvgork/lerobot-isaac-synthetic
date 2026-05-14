@@ -273,7 +273,9 @@ def write_episodes_to_lerobot_dataset(
             for key, value in obs.items():
                 frame[key] = value
             frame["action"] = action
-            frame["next.done"] = [done]
+            # lerobot 0.5 type-checks each feature against meta. `next.done`
+            # is declared as a scalar bool, so wrap as bool not list-of-bool.
+            frame["next.done"] = bool(done)
             # lerobot 0.5 expects every frame dict to carry the task name as
             # a string key, not as a kwarg to add_frame(). Without it,
             # `add_frame` raises "Missing features: {'task'}".
