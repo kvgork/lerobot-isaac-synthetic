@@ -166,6 +166,19 @@ def replay_with_randomization(
             "or activate the workspace pixi env:  pixi shell"
         ) from exc
 
+    # Boot Isaac Sim FIRST. Importing isaaclab.envs before SimulationApp is
+    # alive triggers `ModuleNotFoundError: No module named 'omni'` because the
+    # Kit extension framework is what populates that namespace. Order matters.
+    try:
+        from isaacsim import SimulationApp  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            "isaacsim is required for Isaac Lab DR replay.  "
+            "Run `bash scripts/install_isaac_lab.sh` inside the sim pixi env."
+        ) from exc
+
+    _sim_app = SimulationApp({"headless": True})  # noqa: F841 — keep alive
+
     try:
         import gymnasium as gym  # noqa: F401
     except ImportError as exc:
@@ -176,6 +189,11 @@ def replay_with_randomization(
 
     try:
         import lerobot_isaac_env  # noqa: F401
+        # Env registration happens lazily after SimulationApp init, since
+        # `gym.register(..., entry_point="isaaclab.envs:ManagerBasedRLEnv")`
+        # depends on the Kit extension framework being alive.
+        from lerobot_isaac_env.tasks import _register_envs as _reg
+        _reg()
     except ImportError as exc:
         raise ImportError(
             "lerobot_isaac_env is required to register Isaac Lab environments.  "
