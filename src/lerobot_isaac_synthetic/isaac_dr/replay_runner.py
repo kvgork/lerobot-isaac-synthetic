@@ -203,7 +203,13 @@ def replay_with_randomization(
     else:
         dataset = LeRobotDataset(repo_id=str(source_dataset_path))
 
-    n_source = len(dataset.episode_data_index["from"])
+    # lerobot 0.5 dropped `dataset.episode_data_index`. The per-episode
+    # (from, to) bounds now live in `dataset.meta.episodes` (a HF Dataset)
+    # under columns `dataset_from_index` and `dataset_to_index`.
+    ep_meta = dataset.meta.episodes
+    if hasattr(ep_meta, "to_pandas"):
+        ep_meta = ep_meta.to_pandas()
+    n_source = len(ep_meta)
     if max_episodes is not None:
         n_source = min(n_source, max_episodes)
 
@@ -218,8 +224,8 @@ def replay_with_randomization(
     try:
         for ep_idx in range(n_source):
             # Extract action sequence for this source episode
-            ep_from = dataset.episode_data_index["from"][ep_idx].item()
-            ep_to = dataset.episode_data_index["to"][ep_idx].item()
+            ep_from = int(ep_meta["dataset_from_index"].iloc[ep_idx])
+            ep_to = int(ep_meta["dataset_to_index"].iloc[ep_idx])
             actions_seq = [
                 dataset[frame_idx]["action"] for frame_idx in range(ep_from, ep_to)
             ]
