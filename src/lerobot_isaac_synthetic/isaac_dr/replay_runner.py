@@ -179,6 +179,23 @@ def replay_with_randomization(
 
     _sim_app = SimulationApp({"headless": True})  # noqa: F841 — keep alive
 
+    # Configure the Isaac Sim asset CDN BEFORE any isaaclab.* import. Isaac
+    # Lab evaluates `NUCLEUS_ASSET_ROOT_DIR` at module load time, so if we
+    # only set this after `import isaaclab.envs` the constant is already
+    # frozen as None and downstream USD lookups fail with
+    # `Unable to open the usd file at path: None/Isaac/...`.
+    # The path used here is NVIDIA's public S3 mirror; override with the env
+    # var `ISAAC_ASSET_ROOT_CLOUD` if you have a local Nucleus server.
+    import os as _os
+    import carb  # available after SimulationApp init
+    _asset_root = _os.environ.get(
+        "ISAAC_ASSET_ROOT_CLOUD",
+        "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5",
+    )
+    carb.settings.get_settings().set(
+        "/persistent/isaac/asset_root/cloud", _asset_root
+    )
+
     try:
         import gymnasium as gym  # noqa: F401
     except ImportError as exc:
