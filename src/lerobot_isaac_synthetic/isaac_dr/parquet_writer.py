@@ -226,7 +226,14 @@ def write_episodes_to_lerobot_dataset(
         ) from exc
 
     output_path = Path(output_path).resolve()
-    output_path.mkdir(parents=True, exist_ok=True)
+    # `LeRobotDatasetMetadata.create()` later does `mkdir(exist_ok=False)` and
+    # bails if the leaf directory already exists. Only ensure the PARENT
+    # exists here; let lerobot create the leaf. If a previous run left a
+    # leaf behind, remove it (it's all output, no source data).
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        import shutil as _shutil
+        _shutil.rmtree(output_path)
 
     repo_id = f"local/{output_path.name}"
     episode_list = list(episodes)  # materialise so we can peek at first element
