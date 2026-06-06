@@ -58,8 +58,11 @@ tests/
 - **No lerobot import at module load.** All `lerobot.*` imports inside function bodies.
 - **No Isaac Lab import at module load.** Same rule.
 - **MimicGen never executes without explicit opt-in.** `_check_enabled()` checks env var.
-- **Dataset schema invariant.** Output always: `observation.state (12,)`, `action (6,)`,
-  `observation.images.wrist/overhead` as video binary, `next.done (1,)`.
+- **Dataset schema invariant (DR100 Phase 2, 2026-05-30).** Output always:
+  `observation.state (6,)` joint_pos-only, `action (6,)`,
+  `observation.images.d435_rgb` as PNG-encoded `image` bytes, `next.done (1,)`.
+  (Was `state (12,)` + dual `wrist`/`overhead` video columns pre-migration.)
+  Override the camera column via `replay_runner --camera_key`.
 
 ---
 

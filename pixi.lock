@@ -167,13 +167,14 @@ packages:
 - pypi: ./
   name: lerobot-isaac-synthetic
   version: 0.1.0
-  sha256: 1b0ba3daae234b4f1ff93099699cbb48c9dbbb72c23613a1c61689c552de98e1
+  sha256: ddf6faeb296a0817581fd49c9710f00ec6018322b77cd6dc8424e8b3ffd152e2
   requires_dist:
   - pyarrow>=14.0
   - pandas>=2.0
   - numpy>=1.24
   - pytest>=8.0 ; extra == 'dev'
   - pytest-cov ; extra == 'dev'
+  - lerobot-isaac-adapters ; extra == 'monorepo'
   requires_python: '>=3.10'
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libexpat-2.8.0-hecca717_0.conda
   sha256: ea33c40977ea7a2c3658c522230058395bc2ee0d89d99f0711390b6a1ee80d12
