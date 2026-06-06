@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -173,16 +173,18 @@ def merge_datasets(
     merged_df = pd.concat(
         [real_episodes_df, all_sim_df], ignore_index=True
     ).reset_index(drop=True)
+    # Preserve each row's ORIGINAL (per-source) episode index BEFORE assigning
+    # the new global one — the writer needs it to pull that episode's frames
+    # from its source dataset.
+    merged_df["_src_episode_index"] = merged_df["episode_index"].astype(int)
     merged_df["episode_index"] = range(len(merged_df))
 
-    # --- Write output dataset ------------------------------------------------
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    # Copy frame Parquet files for each episode, rewriting episode_index
-    _copy_and_reindex_episodes(
+    # --- Write output dataset via the LeRobotDataset API ---------------------
+    # (format-agnostic: reads frames through the source dataset object and
+    # re-adds them, so it works for v3.0 sharded layouts. The old pandas
+    # per-episode-parquet copy assumed the v2.x layout and dropped all frames.)
+    _write_merged_via_api(
         merged_df=merged_df,
-        real_path=real_path,
-        sim_paths=sim_paths,
         output_path=output_path,
         fps=fps,
         task_name=task_name,
@@ -203,21 +205,135 @@ def merge_datasets(
 # ---------------------------------------------------------------------------
 
 
+def _write_merged_via_api(
+    merged_df: "Any",
+    output_path: Path,
+    fps: int,
+    task_name: str,
+) -> Path:
+    """Write the merged dataset by reading frames through the LeRobotDataset API.
+
+    Format-agnostic: pulls each selected source episode's frames via the source
+    ``LeRobotDataset`` object (handles v3.0 sharded layouts) and re-adds them to
+    a fresh ``LeRobotDataset.create``. Image columns are round-tripped CHW-float
+    → HWC-uint8 (the format ``add_frame`` expects), matching the DR-replay write
+    path. ``merged_df`` must carry ``_dataset_path`` + ``_src_episode_index``.
+    """
+    import json
+    import shutil
+
+    import numpy as np
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    output_path = Path(output_path)
+    if output_path.exists():
+        shutil.rmtree(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    _META_KEYS = {"timestamp", "frame_index", "episode_index", "index", "task_index"}
+    first_src = Path(merged_df.iloc[0]["_dataset_path"])
+    info = json.loads((first_src / "meta" / "info.json").read_text())
+    # Coerce shapes list→tuple — lerobot add_frame compares array.shape (tuple)
+    # to feature['shape']; a JSON list ([6]) never equals (6,) → all frames fail.
+    features = {}
+    for k, v in info["features"].items():
+        if k in _META_KEYS:
+            continue
+        v = dict(v)
+        if v.get("shape") is not None:
+            v["shape"] = tuple(v["shape"])
+        features[k] = v
+    img_keys = {k for k, v in features.items() if v.get("dtype") == "image"}
+
+    out = LeRobotDataset.create(
+        repo_id=f"local/{output_path.name}",
+        fps=fps,
+        features=features,
+        root=output_path,
+    )
+
+    _cache: dict[str, Any] = {}
+
+    def _ds(path: str) -> Any:
+        if path not in _cache:
+            pp = Path(path)
+            _cache[path] = LeRobotDataset(repo_id=f"local/{pp.name}", root=path)
+        return _cache[path]
+
+    def _bounds(ds: Any, ep: int) -> tuple[int, int]:
+        em = ds.meta.episodes
+        if hasattr(em, "to_pandas"):
+            em = em.to_pandas()
+        return (
+            int(em["dataset_from_index"].iloc[ep]),
+            int(em["dataset_to_index"].iloc[ep]),
+        )
+
+    def _to_np(key: str, v: Any) -> Any:
+        t = v
+        if key in img_keys:
+            # Keep CHW (the source + real schema declare [3,480,640]); just
+            # drop any batch dim and ensure uint8.
+            if hasattr(t, "ndim") and t.ndim == 4:
+                t = t[0]
+            arr = t.detach().cpu().numpy() if hasattr(t, "detach") else np.asarray(t)
+            if arr.dtype != np.uint8:
+                if float(arr.max()) <= 1.0 + 1e-3:
+                    arr = arr * 255.0
+                arr = arr.clip(0, 255).astype(np.uint8)
+            return np.ascontiguousarray(arr)
+        return t.detach().cpu().numpy() if hasattr(t, "detach") else np.asarray(t)
+
+    n_eps = 0
+    for _, row in merged_df.iterrows():
+        ds = _ds(str(row["_dataset_path"]))
+        ep = int(row["_src_episode_index"])
+        frm, to = _bounds(ds, ep)
+        for gi in range(frm, to):
+            src = ds[gi]
+            frame = {k: _to_np(k, src[k]) for k in features if k in src}
+            frame["task"] = task_name
+            out.add_frame(frame)
+        out.save_episode()
+        n_eps += 1
+
+    if hasattr(out, "finalize"):
+        out.finalize()
+    logger.info("Merged %d episodes via LeRobotDataset API → %s", n_eps, output_path)
+    return output_path
+
+
 def _load_episodes_df(dataset_path: Path, default_source: str) -> pd.DataFrame:
-    """Load ``meta/episodes.parquet`` into a DataFrame, adding source if absent."""
+    """Load episode metadata into a DataFrame, adding source if absent.
+
+    Handles BOTH LeRobotDataset layouts:
+      - v2.x: a single ``meta/episodes.parquet``
+      - v3.0: sharded ``meta/episodes/chunk-XXX/file-XXX.parquet``
+    (the v3.0 layout is what ``LeRobotDataset.create`` writes — the DR replay
+    and the real SO-101 dataset are both v3.0, so the flat-only lookup found
+    nothing and silently produced an empty merge).
+    """
     import pandas as pd
 
     episodes_file = dataset_path / "meta" / "episodes.parquet"
-    if not episodes_file.exists():
+    shard_files = sorted(
+        (dataset_path / "meta" / "episodes").glob("chunk-*/file-*.parquet")
+    )
+
+    if episodes_file.exists():
+        df = pd.read_parquet(episodes_file)
+    elif shard_files:
+        df = pd.concat([pd.read_parquet(f) for f in shard_files], ignore_index=True)
+    else:
         logger.warning(
-            "meta/episodes.parquet not found at %s — treating as empty dataset.",
+            "no meta/episodes(.parquet | /chunk-*/file-*.parquet) at %s — "
+            "treating as empty dataset.",
             dataset_path,
         )
         return pd.DataFrame(
             columns=["episode_index", "length", "tasks_index", "source"]
         )
 
-    df = pd.read_parquet(episodes_file)
     if "source" not in df.columns:
         df["source"] = default_source
     df["_dataset_path"] = str(dataset_path)

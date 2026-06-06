@@ -22,11 +22,20 @@ LeRobotDataset v3.0 schema reference
   - ``frame_index`` (int64)
   - ``episode_index`` (int64)
   - ``timestamp`` (float64)  — seconds since episode start
-  - ``observation.state`` (list<float64>, length 12)
-  - ``observation.images.wrist`` (binary)  — JPEG-encoded bytes
-  - ``observation.images.overhead`` (binary)  — JPEG-encoded bytes
-  - ``action`` (list<float64>, length 6)
-  - ``next.done`` (bool)
+  - ``observation.state`` (list<float32>, length 12)  — joint_pos[6]+joint_vel[6]
+  - ``observation.images.overhead`` (binary)  — PNG-encoded bytes, HWC uint8
+  - ``action`` (list<float32>, length 6)
+  - ``next.reward`` (float32)  — sparse terminal: 1.0 on the last frame of a
+    successful episode, 0.0 otherwise
+  - ``next.done`` (bool)  — True on the last frame
+
+Canonical schema (2026-06-06): synthetic output matches the
+``robot_data_recorder`` contract — 12-dim ``observation.state``
+(joint_pos[6]+joint_vel[6], velocity zero-filled in sim), a single ``overhead``
+PNG camera column (HWC), and ``next.reward`` + ``next.done``. This supersedes
+the DR100 Phase 1/2 (2026-05-26) 6-dim / ``d435_rgb`` / CHW layout so that real
+recordings and synthetic DR data share one feature schema and ``merge_datasets``
+produces a trainable union for both the policy and the world model.
 
 ``meta/episodes.parquet`` columns:
   - ``episode_index``, ``length``, ``tasks_index``, ``source``
@@ -55,54 +64,34 @@ from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
-# Standard SO-101 feature definition used when no features dict is provided.
+# Canonical SO-101 feature definition (matches robot_data_recorder output).
+# Used when no features dict is provided.
 _DEFAULT_SO101_FEATURES: dict[str, Any] = {
     "observation.state": {
         "dtype": "float32",
         "shape": (12,),
-        "names": [
-            "joint_pos_0",
-            "joint_pos_1",
-            "joint_pos_2",
-            "joint_pos_3",
-            "joint_pos_4",
-            "joint_pos_5",
-            "joint_vel_0",
-            "joint_vel_1",
-            "joint_vel_2",
-            "joint_vel_3",
-            "joint_vel_4",
-            "joint_vel_5",
-        ],
+        "names": [f"joint_pos_{i}" for i in range(6)]
+        + [f"joint_vel_{i}" for i in range(6)],
     },
-    "observation.images.wrist": {
-        "dtype": "video",
-        "shape": (480, 640, 3),
-        "names": ["height", "width", "channel"],
-        "video_info": {
-            "video.fps": 30,
-            "video.codec": "av1",
-            "video.pix_fmt": "yuv420p",
-            "video.is_depth_map": False,
-            "has_audio": False,
-        },
-    },
+    # Single overhead D435 camera. PNG-encoded bytes per frame, channel-last
+    # (HWC) — matches the robot_data_recorder `observation.images.overhead`
+    # column and the bridge's `dtype: image` (PNG-in-parquet) support.
     "observation.images.overhead": {
-        "dtype": "video",
+        "dtype": "image",
         "shape": (480, 640, 3),
         "names": ["height", "width", "channel"],
-        "video_info": {
-            "video.fps": 30,
-            "video.codec": "av1",
-            "video.pix_fmt": "yuv420p",
-            "video.is_depth_map": False,
-            "has_audio": False,
-        },
     },
     "action": {
         "dtype": "float32",
         "shape": (6,),
         "names": ["joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5"],
+    },
+    # Sparse terminal success reward (1.0 on the last frame of a successful
+    # episode, 0.0 otherwise) — the channel the world-model bridge reads.
+    "next.reward": {
+        "dtype": "float32",
+        "shape": (1,),
+        "names": None,
     },
     "next.done": {
         "dtype": "bool",
@@ -133,20 +122,15 @@ def _derive_features_from_episode(episode: Any) -> dict[str, Any]:
 
             arr = np.asarray(value)
             if arr.ndim == 3 and arr.shape[-1] == 3:
-                # Image — record as video feature
+                # Image — record as PNG-encoded image feature (DR100 Phase 2).
+                # Was previously a `video` feature; the bridge + real SO-101
+                # dataset use `dtype: image` (PNG bytes in parquet).
                 h, w, c = arr.shape
                 feat_name = key
                 features[feat_name] = {
-                    "dtype": "video",
+                    "dtype": "image",
                     "shape": (h, w, c),
                     "names": ["height", "width", "channel"],
-                    "video_info": {
-                        "video.fps": 30,
-                        "video.codec": "av1",
-                        "video.pix_fmt": "yuv420p",
-                        "video.is_depth_map": False,
-                        "has_audio": False,
-                    },
                 }
             else:
                 features[key] = {
@@ -171,6 +155,7 @@ def _derive_features_from_episode(episode: Any) -> dict[str, Any]:
     else:
         features["action"] = _DEFAULT_SO101_FEATURES["action"]
 
+    features["next.reward"] = _DEFAULT_SO101_FEATURES["next.reward"]
     features["next.done"] = _DEFAULT_SO101_FEATURES["next.done"]
 
     return features if features else dict(_DEFAULT_SO101_FEATURES)
@@ -271,12 +256,23 @@ def write_episodes_to_lerobot_dataset(
 
             frame: dict[str, Any] = {}
             for key, value in obs.items():
-                frame[key] = value
-            frame["action"] = action
-            # lerobot 0.5 type-checks each feature as a numpy array. Wrap
-            # `next.done` as a 1-element bool ndarray rather than scalar/list.
-            import numpy as _np
-            frame["next.done"] = _np.array([bool(done)], dtype=_np.bool_)
+                if key in features:  # only emit declared columns
+                    frame[key] = value
+            if "action" in features:
+                frame["action"] = action
+            # Emit next.reward / next.done only when the schema declares them
+            # (adding an undeclared key makes add_frame fail). `next.reward` is
+            # the sparse terminal success signal: 1.0 on the final frame of a
+            # successful episode (matching robot_data_recorder + the world-model
+            # bridge convention), 0.0 elsewhere.
+            if "next.reward" in features:
+                import numpy as _np
+                is_success = bool(getattr(ep, "success", False))
+                reward = 1.0 if (done and is_success) else 0.0
+                frame["next.reward"] = _np.array([reward], dtype=_np.float32)
+            if "next.done" in features:
+                import numpy as _np
+                frame["next.done"] = _np.array([bool(done)], dtype=_np.bool_)
             # lerobot 0.5 expects every frame dict to carry the task name as
             # a string key, not as a kwarg to add_frame(). Without it,
             # `add_frame` raises "Missing features: {'task'}".

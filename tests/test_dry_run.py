@@ -166,6 +166,43 @@ def test_dry_run_seed_propagated(tmp_path, capsys):
     assert "42" in out
 
 
+def test_dry_run_default_camera_key_is_overhead(tmp_path, capsys):
+    """Canonical schema: default camera_key is ``overhead``, shown in dry-run."""
+    from lerobot_isaac_synthetic.isaac_dr import replay_runner
+
+    fake_src = tmp_path / "real_dataset"
+    _run_main(
+        ["replay_runner", "--source_dataset", str(fake_src), "--dry_run"],
+        replay_runner,
+    )
+    out = capsys.readouterr().out
+    assert "overhead" in out
+    assert "observation.images.overhead" in out
+
+
+def test_dry_run_custom_camera_key_and_source_tag(tmp_path, capsys):
+    """--camera_key and --source_tag are echoed in dry-run output."""
+    from lerobot_isaac_synthetic.isaac_dr import replay_runner
+
+    fake_src = tmp_path / "real_dataset"
+    _run_main(
+        [
+            "replay_runner",
+            "--source_dataset",
+            str(fake_src),
+            "--camera_key",
+            "wrist_cam",
+            "--source_tag",
+            "sim_dr_v2",
+            "--dry_run",
+        ],
+        replay_runner,
+    )
+    out = capsys.readouterr().out
+    assert "wrist_cam" in out
+    assert "sim_dr_v2" in out
+
+
 def test_dry_run_does_not_import_lerobot(tmp_path, monkeypatch):
     """--dry_run must NOT trigger lerobot/gymnasium imports."""
     import sys as _sys

@@ -39,6 +39,128 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Iterator
 
+
+def _to_hwc_uint8(cam: Any) -> Any:
+    """Convert an Isaac camera obs tensor → HWC uint8 numpy.
+
+    Output is channel-LAST (H, W, C) to match the canonical SO-101 schema the
+    ``robot_data_recorder`` emits (``observation.images.<cam>`` declared
+    ``(480, 640, 3)`` HWC — the layout lerobot's ``dtype: image`` stores).
+    Accepts (N,C,H,W) / (C,H,W) / (N,H,W,C) / (H,W,C), float [0,1] or uint8;
+    drops the batch dim, transposes CHW→HWC, and scales floats to uint8.
+    """
+    import numpy as np
+    import torch
+
+    t = cam.detach().cpu() if isinstance(cam, torch.Tensor) else torch.as_tensor(cam)
+    if t.ndim == 4:  # drop batch dim: (N,C,H,W)/(N,H,W,C) → 3-D
+        t = t[0]
+    arr = t.numpy()
+    if arr.ndim == 3 and arr.shape[0] == 3 and arr.shape[-1] != 3:
+        # Channel-first (C,H,W) → channel-last (H,W,C)
+        arr = np.transpose(arr, (1, 2, 0))
+    if arr.dtype != np.uint8:
+        if float(arr.max()) <= 1.0 + 1e-3:
+            arr = arr * 255.0
+        arr = arr.clip(0, 255).astype(np.uint8)
+    return np.ascontiguousarray(arr)
+
+
+def _to_state_vec(jp: Any, jv: Any = None) -> Any:
+    """Convert joint_pos (+ optional joint_vel) obs tensors → (12,) float32.
+
+    The canonical SO-101 ``observation.state`` is 12-dim =
+    joint_pos[6] + joint_vel[6], matching ``robot_data_recorder`` output and the
+    trainer / world-model bridge expectation. The Isaac policy obs group exposes
+    joint_pos only (joint_vel is privileged / usually absent), so velocity is
+    zero-filled when not provided — exactly matching the real follower arm, which
+    also reports zero velocity. Keeping the 12-dim layout makes synthetic rows
+    merge-compatible with real recordings.
+    """
+    import numpy as np
+    import torch
+
+    def _vec6(x: Any) -> Any:
+        t = x.detach().cpu() if isinstance(x, torch.Tensor) else torch.as_tensor(x)
+        if t.ndim == 2:  # (N,6) → (6,)
+            t = t[0]
+        return t.numpy().astype(np.float32)
+
+    pos = _vec6(jp)
+    vel = _vec6(jv) if jv is not None else np.zeros_like(pos)
+    return np.concatenate([pos, vel]).astype(np.float32)
+
+
+def _find_image_obs(pol: dict[str, Any]) -> Any:
+    """Return the first obs value that looks like an image tensor (rank ≥ 3).
+
+    Lets the synthetic adapter locate the env camera term regardless of its name
+    (e.g. ``d435_rgb``) so it can be re-exported under the dataset's canonical
+    camera column. Non-image terms (joint_pos, joint_vel, last_action) are 1-2D
+    and skipped. Returns ``None`` if no image-like term is present.
+    """
+    import numpy as np
+
+    for value in pol.values():
+        if value is None:
+            continue
+        try:
+            arr = (
+                value.detach().cpu().numpy()
+                if hasattr(value, "detach")
+                else np.asarray(value)
+            )
+        except Exception:
+            continue
+        if arr.ndim >= 3:
+            return value
+    return None
+
+
+def _to_action_vec(action: Any) -> Any:
+    """Convert a recorded action → (6,) float32 numpy (drop batch dim)."""
+    import numpy as np
+    import torch
+
+    t = (
+        action.detach().cpu()
+        if isinstance(action, torch.Tensor)
+        else torch.as_tensor(np.asarray(action))
+    )
+    if t.ndim == 2:
+        t = t[0]
+    return t.numpy().astype(np.float32)
+
+
+def _env_obs_to_lerobot_row(obs: Any, camera_key: str | None) -> dict[str, Any]:
+    """Flatten one Isaac env obs dict → a canonical SO-101 LeRobot frame row.
+
+    Produces the schema ``robot_data_recorder`` emits, so real + synthetic data
+    share one feature contract and can be merged / trained together:
+      - image → ``observation.images.<camera_key>`` (HWC uint8). ``camera_key``
+        is the *output* dataset column (default ``overhead``). The env's source
+        camera term may be named differently (e.g. ``d435_rgb``); it is
+        auto-detected and re-exported under ``camera_key``, decoupling the
+        dataset column name from the env obs-term name.
+      - state → ``observation.state`` (12,) float32 = joint_pos[6]+joint_vel[6]
+        (velocity zero-filled when the policy obs group omits it).
+    ``camera_key=None`` yields state-only rows.
+    """
+    pol = obs.get("policy", obs) if isinstance(obs, dict) else obs
+    row: dict[str, Any] = {}
+    if isinstance(pol, dict):
+        if pol.get("joint_pos") is not None:
+            row["observation.state"] = _to_state_vec(
+                pol["joint_pos"], pol.get("joint_vel")
+            )
+        if camera_key:
+            img = pol.get(camera_key)
+            if img is None:
+                img = _find_image_obs(pol)
+            if img is not None:
+                row[f"observation.images.{camera_key}"] = _to_hwc_uint8(img)
+    return row
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +212,7 @@ def replay_with_randomization(
     env_id: str = "Isaac-SO101-PickPlace-v0",
     max_episodes: int | None = None,
     base_seed: int | None = None,
+    camera_key: str | None = None,
 ) -> Iterator[Episode]:
     """Replay source episodes through an Isaac Lab DR environment.
 
@@ -166,18 +289,35 @@ def replay_with_randomization(
             "or activate the workspace pixi env:  pixi shell"
         ) from exc
 
-    # Boot Isaac Sim FIRST. Importing isaaclab.envs before SimulationApp is
-    # alive triggers `ModuleNotFoundError: No module named 'omni'` because the
-    # Kit extension framework is what populates that namespace. Order matters.
+    # Boot Isaac Sim FIRST. Importing isaaclab.envs before the app is alive
+    # triggers `ModuleNotFoundError: No module named 'omni'`. Order matters.
+    #
+    # Use isaaclab's AppLauncher (NOT the raw isaacsim.SimulationApp): only
+    # AppLauncher sets the internal carb flag that isaaclab's Camera spawn
+    # checks. A raw SimulationApp({"enable_cameras": True}) still raises
+    # "A camera was spawned without the --enable_cameras flag" at env reset.
     try:
-        from isaacsim import SimulationApp  # noqa: F401
+        from isaaclab.app import AppLauncher
     except ImportError as exc:
         raise ImportError(
-            "isaacsim is required for Isaac Lab DR replay.  "
+            "isaaclab is required for Isaac Lab DR replay.  "
             "Run `bash scripts/install_isaac_lab.sh` inside the sim pixi env."
         ) from exc
 
-    _sim_app = SimulationApp({"headless": True})  # noqa: F841 — keep alive
+    # enable_cameras MUST be set at app launch to capture d435_rgb frames.
+    _enable_cameras = camera_key is not None
+    # AppLauncher inspects sys.argv; strip leftover CLI flags so Kit doesn't
+    # choke on them.
+    import sys as _sys
+
+    _saved_argv = _sys.argv
+    _sys.argv = _sys.argv[:1]
+    try:
+        _sim_app = AppLauncher(  # noqa: F841 — keep alive
+            headless=True, enable_cameras=_enable_cameras
+        ).app
+    finally:
+        _sys.argv = _saved_argv
 
     # Configure the Isaac Sim asset CDN BEFORE any isaaclab.* import. Isaac
     # Lab evaluates `NUCLEUS_ASSET_ROOT_DIR` at module load time, so if we
@@ -248,8 +388,22 @@ def replay_with_randomization(
     if max_episodes is not None:
         n_source = min(n_source, max_episodes)
 
-    logger.info("Creating env %s (headless)", env_id)
-    env = gym.make(env_id, headless=True)
+    logger.info("Creating env %s (headless, cameras=%s)", env_id, _enable_cameras)
+    if _enable_cameras:
+        # Build a cameras-enabled cfg so the env wires the d435_rgb obs term —
+        # enabling cameras on the app alone is NOT enough (see
+        # so101_env_cfg._wire_cameras). Map env_id -> task cfg class.
+        import lerobot_isaac_env.tasks as _tasks
+
+        _CFG_BY_ENV = {
+            "Isaac-SO101-PickPlace-v0": "PickAndPlaceEnvCfg",
+            "Isaac-SO101-Pick-v0": "PickEnvCfg",
+        }
+        _cfg_cls_name = _CFG_BY_ENV.get(env_id, "PickAndPlaceEnvCfg")
+        _cfg = getattr(_tasks, _cfg_cls_name)(enable_cameras=True)
+        env = gym.make(env_id, cfg=_cfg, headless=True)
+    else:
+        env = gym.make(env_id, headless=True)
 
     # Apply DR config overrides before first reset
     if dr_config:
@@ -291,8 +445,11 @@ def replay_with_randomization(
                         dtype=_torch.float32,
                     )
                     obs, _reward, terminated, truncated, info = env.step(action_t)
-                    obs_list.append(dict(obs) if not isinstance(obs, dict) else obs)
-                    action_list.append(raw_action)
+                    # Flatten env obs (nested policy group) → LeRobot row so the
+                    # parquet writer emits observation.images.<cam> (PNG, HWC) +
+                    # observation.state (12,). camera_key=None → state-only rows.
+                    obs_list.append(_env_obs_to_lerobot_row(obs, camera_key))
+                    action_list.append(_to_action_vec(raw_action))
                     # Isaac Lab returns (num_envs,)-shaped done flags.
                     done_flag = bool(
                         (terminated[0] if hasattr(terminated, "__getitem__")
@@ -435,6 +592,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Gymnasium env ID (registered by lerobot_isaac_env).",
     )
     p.add_argument(
+        "--camera_key",
+        default="overhead",
+        metavar="KEY",
+        help=(
+            "Dataset camera column name; the frame is stored as "
+            "'observation.images.<KEY>'. The env's source camera term (e.g. "
+            "d435_rgb) is auto-detected and re-exported under this name, so it "
+            "matches the robot_data_recorder canonical 'overhead' column and "
+            "real + synthetic data merge cleanly. Default: %(default)s."
+        ),
+    )
+    p.add_argument(
+        "--source_tag",
+        default="sim_dr",
+        metavar="TAG",
+        help=(
+            "Value written to the 'source' column of meta/episodes.parquet "
+            "so training code can filter synthetic vs real. Default: %(default)s."
+        ),
+    )
+    p.add_argument(
         "--max_episodes",
         type=int,
         default=None,
@@ -472,9 +650,9 @@ def _resolve_output_path(output_path: Path | None) -> Path:
     return Path(f"datasets/dr_replay_{ts}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Resolve legacy --source_dataset_path alias
     source = args.source_dataset or args.source_dataset_path_legacy
@@ -491,6 +669,9 @@ def main() -> None:
         print(f"  n_variants          : {args.n_variants}")
         print(f"  task                : {args.task}")
         print(f"  env_id              : {args.env_id}")
+        print(f"  camera_key          : {args.camera_key}")
+        print(f"  source_tag          : {args.source_tag}")
+        print(f"  obs_image_column    : observation.images.{args.camera_key}")
         print(f"  max_episodes        : {args.max_episodes}")
         print(f"  seed                : {effective_seed}")
         return
@@ -506,11 +687,45 @@ def main() -> None:
         seed=effective_seed,
         env_id=args.env_id,
         max_episodes=args.max_episodes,
+        camera_key=args.camera_key,
     )
+    # Reuse the SOURCE dataset's feature schema so the synthetic dataset is
+    # byte-for-byte schema-compatible with the real one (same image layout
+    # CHW [3,480,640], joint names, etc.) — required to merge / co-train.
+    features = _load_source_features(source)
     write_episodes_to_lerobot_dataset(
         episodes=episodes,
         output_path=resolved_output,
+        source_tag=args.source_tag,
+        task_name=args.task,
+        features=features,
     )
+
+
+def _load_source_features(source: str | Path) -> dict[str, Any] | None:
+    """Load a source LeRobotDataset's feature schema (shapes coerced to tuples).
+
+    lerobot's ``add_frame`` compares array shapes (tuples) to feature shapes;
+    JSON loads them as lists, so ``(6,) != [6]`` and every add_frame fails.
+    Coerce to tuples here. Returns None for non-local sources (HF repo ids) so
+    the writer falls back to deriving features from the first episode.
+    """
+    import json
+
+    info = Path(source) / "meta" / "info.json"
+    if not info.is_file():
+        return None
+    feats = json.loads(info.read_text()).get("features", {})
+    meta_keys = {"timestamp", "frame_index", "episode_index", "index", "task_index"}
+    out: dict[str, Any] = {}
+    for k, v in feats.items():
+        if k in meta_keys:
+            continue
+        v = dict(v)
+        if v.get("shape") is not None:
+            v["shape"] = tuple(v["shape"])
+        out[k] = v
+    return out or None
 
 
 if __name__ == "__main__":
