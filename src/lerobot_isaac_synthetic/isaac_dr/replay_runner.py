@@ -689,16 +689,19 @@ def main(argv: list[str] | None = None) -> None:
         max_episodes=args.max_episodes,
         camera_key=args.camera_key,
     )
-    # Reuse the SOURCE dataset's feature schema so the synthetic dataset is
-    # byte-for-byte schema-compatible with the real one (same image layout
-    # CHW [3,480,640], joint names, etc.) — required to merge / co-train.
-    features = _load_source_features(source)
+    # Emit the canonical 2026-06-06 schema (12-dim observation.state =
+    # joint_pos[6]+joint_vel[6], single `<camera_key>` PNG column) by letting
+    # the writer derive features from the generated episodes themselves
+    # (`features=None`). This deliberately does NOT inherit the source
+    # dataset's schema: the source (so101-pickplace1) is the legacy
+    # 6-dim/d435_rgb layout, which the migration supersedes so synthetic +
+    # robot_data_recorder share one feature contract for merge / co-train.
     write_episodes_to_lerobot_dataset(
         episodes=episodes,
         output_path=resolved_output,
         source_tag=args.source_tag,
         task_name=args.task,
-        features=features,
+        features=None,
     )
 
 

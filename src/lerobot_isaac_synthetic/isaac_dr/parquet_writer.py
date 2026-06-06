@@ -25,17 +25,25 @@ LeRobotDataset v3.0 schema reference
   - ``observation.state`` (list<float32>, length 12)  — joint_pos[6]+joint_vel[6]
   - ``observation.images.overhead`` (binary)  — PNG-encoded bytes, HWC uint8
   - ``action`` (list<float32>, length 6)
-  - ``next.reward`` (float32)  — sparse terminal: 1.0 on the last frame of a
-    successful episode, 0.0 otherwise
-  - ``next.done`` (bool)  — True on the last frame
+  (plus lerobot-managed bookkeeping columns: timestamp, frame_index,
+  episode_index, index, task_index — added automatically by LeRobotDataset.)
 
 Canonical schema (2026-06-06): synthetic output matches the
 ``robot_data_recorder`` contract — 12-dim ``observation.state``
-(joint_pos[6]+joint_vel[6], velocity zero-filled in sim), a single ``overhead``
-PNG camera column (HWC), and ``next.reward`` + ``next.done``. This supersedes
-the DR100 Phase 1/2 (2026-05-26) 6-dim / ``d435_rgb`` / CHW layout so that real
-recordings and synthetic DR data share one feature schema and ``merge_datasets``
-produces a trainable union for both the policy and the world model.
+(joint_pos[6]+joint_vel[6], velocity zero-filled in sim) and a single
+``overhead`` PNG camera column (HWC). This supersedes the DR100 Phase 1/2
+(2026-05-26) 6-dim / ``d435_rgb`` / CHW layout so that real recordings and
+synthetic DR data share one feature schema and ``merge_datasets`` produces a
+trainable union for both the policy and the world model.
+
+The real ``robot_data_recorder`` datasets carry NO ``next.reward`` /
+``next.done`` columns, so the derived synthetic schema omits them too (a merged
+real+sim union could not include them anyway). ``_DEFAULT_SO101_FEATURES`` still
+declares them for the explicit-features fallback path, but the production
+derive-from-episode path (``features=None``) does not emit them. Note: lerobot
+0.5 maps a shape-(1,) scalar feature to an HF ``Value`` whose ``encode_example``
+calls ``float()``, which is incompatible with numpy 2.x — so re-introducing a
+scalar reward channel needs a numpy-2-safe encoding.
 
 ``meta/episodes.parquet`` columns:
   - ``episode_index``, ``length``, ``tasks_index``, ``source``
@@ -155,8 +163,13 @@ def _derive_features_from_episode(episode: Any) -> dict[str, Any]:
     else:
         features["action"] = _DEFAULT_SO101_FEATURES["action"]
 
-    features["next.reward"] = _DEFAULT_SO101_FEATURES["next.reward"]
-    features["next.done"] = _DEFAULT_SO101_FEATURES["next.done"]
+    # NOTE: deliberately do NOT inject next.reward / next.done here. The real
+    # robot_data_recorder datasets (e.g. so101-pickplace1) carry only
+    # observation.state / observation.images.* / action, so synthetic DR data
+    # must match for merge_datasets to produce a schema-compatible union.
+    # (lerobot 0.5 also maps a shape-(1,) scalar feature to an HF Value whose
+    # encode_example calls float() — incompatible with numpy 2.x — so emitting
+    # these would break save_episode regardless.)
 
     return features if features else dict(_DEFAULT_SO101_FEATURES)
 
@@ -269,10 +282,15 @@ def write_episodes_to_lerobot_dataset(
                 import numpy as _np
                 is_success = bool(getattr(ep, "success", False))
                 reward = 1.0 if (done and is_success) else 0.0
-                frame["next.reward"] = _np.array([reward], dtype=_np.float32)
+                # Emit a 0-d ndarray: lerobot add_frame validation requires an
+                # np.ndarray (rejects a bare np.float32), while HF from_dict maps
+                # the shape-(1,) feature to a scalar Value whose encode_example
+                # calls float(value) — which works on a 0-d array but raises on
+                # a (1,)-array under numpy 2.x.
+                frame["next.reward"] = _np.array(reward, dtype=_np.float32)
             if "next.done" in features:
                 import numpy as _np
-                frame["next.done"] = _np.array([bool(done)], dtype=_np.bool_)
+                frame["next.done"] = _np.array(done, dtype=bool)
             # lerobot 0.5 expects every frame dict to carry the task name as
             # a string key, not as a kwarg to add_frame(). Without it,
             # `add_frame` raises "Missing features: {'task'}".
