@@ -4,13 +4,14 @@ bridge_invocation
 Thin wrapper that invokes the ``lerobot_mimicgen_bridge`` skill to run
 MimicGen-based data augmentation.
 
-This module is the **deferred path** described in Phase 4b of the build plan.
-All public functions raise ``NotImplementedError`` until the path is activated.
+Status (2026-05-21): **un-stubbed**. Bundle D of the deferred-bundle plan
+landed; this module now delegates to the canonical skill operations rather
+than raising ``NotImplementedError``.
 
 Priority path
 -------------
-The **Isaac Lab DR replay** pipeline is the recommended way to generate
-synthetic data:
+The **Isaac Lab DR replay** pipeline is still the recommended default for
+synthetic data generation:
 
     from lerobot_isaac_synthetic.isaac_dr.replay_runner import replay_with_randomization
     from lerobot_isaac_synthetic.isaac_dr.parquet_writer import write_episodes_to_lerobot_dataset
@@ -18,54 +19,36 @@ synthetic data:
     episodes = replay_with_randomization(source_dataset_path=..., n_variants_per_episode=5)
     write_episodes_to_lerobot_dataset(episodes, output_path=...)
 
-Use the MimicGen path only when the Isaac Lab DR path is unavailable or when
-MuJoCo-based augmentation is explicitly required.
+Use the MimicGen path when:
+- The Isaac Lab DR path is unavailable.
+- MuJoCo / robosuite-based augmentation is explicitly required.
+- A specific MimicGen task config exists for the workload.
 
-Activation
-----------
-Enable by setting the environment variable ``LEROBOT_MIMICGEN_ENABLED=1``
-**and** ensuring MimicGen + robosuite are installed in the current environment.
+Activation gate
+---------------
+The functions remain gated behind ``LEROBOT_MIMICGEN_ENABLED=1`` or
+``enabled=True`` to prevent accidental activation in environments that do not
+have MimicGen / robosuite installed. The gate **also** verifies the skill
+operations module can be imported; if not, a clear ImportError is raised.
 
-Recommended invocation (via agent)
-------------------------------------
-Rather than calling this module directly, invoke the dedicated orchestration
-agent, which handles the full pipeline including error recovery and dataset
-validation:
-
-    Task(lerobot-sim-augmentation-agent, {
-        "real_dataset_path": "/data/real",
-        "task_config": "pick_and_place",
-        "n_synthetic_demos": 200,
-        "output_path": "/data/synthetic_mimicgen"
-    })
-
-Skill reference (conversion only — no MimicGen orchestration):
+Skill reference:
   ${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md
-
-Usage (deferred stub)
----------------------
->>> from lerobot_isaac_synthetic.mimicgen.bridge_invocation import run_mimicgen
->>> run_mimicgen(
-...     real_dataset_path="/data/real",
-...     n_synthetic_demos=200,
-...     task_config="pick_and_place",
-...     output_path="/data/synthetic_mimicgen",
-... )
-NotImplementedError: MimicGen bridge path is deferred.  Use the Isaac Lab DR
-  replay pipeline (isaac_dr.replay_runner) as the priority alternative, or
-  invoke via `lerobot-sim-augmentation-agent` / skill ...
+  Functions: parquet_to_mimicgen, mimicgen_to_parquet, run_mimicgen,
+             merge_datasets, validate_conversion
 """
 
 from __future__ import annotations
 
-import os
+import importlib
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _ENABLED_ENV_VAR = "LEROBOT_MIMICGEN_ENABLED"
+_SKILL_MODULE = "lerobot_mimicgen_bridge.operations"
 _SKILL_PATH = os.path.expandvars(
     "${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md"
 )
@@ -76,8 +59,39 @@ _DR_MODULE = "lerobot_isaac_synthetic.isaac_dr.replay_runner"
 
 
 def _check_enabled() -> bool:
-    """Return True if the MimicGen path has been explicitly activated."""
     return os.environ.get(_ENABLED_ENV_VAR, "0").strip() in ("1", "true", "yes")
+
+
+def _require_active(enabled: bool) -> None:
+    if not (enabled or _check_enabled()):
+        raise NotImplementedError(
+            "MimicGen bridge path requires explicit activation.\n"
+            f"  Set {_ENABLED_ENV_VAR}=1 or pass enabled=True.\n"
+            f"  Priority alternative: {_DR_MODULE}.replay_with_randomization\n"
+            f"  Skill spec: {_SKILL_PATH}\n"
+            f"  Agent spec: {_AGENT_PATH}"
+        )
+
+
+def _load_skill_ops():
+    try:
+        return importlib.import_module(_SKILL_MODULE)
+    except ImportError as e:
+        raise ImportError(
+            f"Cannot import {_SKILL_MODULE}. The MimicGen bridge skill must be "
+            f"installed in this env.\n"
+            f"Install via: pip install -e ${{CLAUDE_CODE_ROOT}}/skills/lerobot_mimicgen_bridge\n"
+            f"Skill spec: {_SKILL_PATH}"
+        ) from e
+
+
+def _unwrap(result: Any, expected_path: Path) -> Path:
+    """Skill ops return OperationResult; surface as Path or raise on failure."""
+    if hasattr(result, "success") and not result.success:
+        raise RuntimeError(
+            f"Skill operation failed: {getattr(result, 'message', 'unknown error')}"
+        )
+    return expected_path
 
 
 def run_mimicgen(
@@ -86,117 +100,100 @@ def run_mimicgen(
     task_config: str | dict[str, Any],
     output_path: str | Path,
     enabled: bool = False,
+    n_source_demos: int = 10,
+    fps: int = 30,
+    camera_name: str = "agentview",
 ) -> Path:
-    """Invoke the MimicGen bridge to augment a real LeRobotDataset.
+    """End-to-end MimicGen augmentation pipeline.
 
-    This is a **deferred stub**.  The Isaac Lab DR replay pipeline is the
-    recommended alternative for synthetic data generation.
-
-    Priority alternative
-    --------------------
-    Use the now-real Isaac Lab DR pipeline instead:
-
-        from lerobot_isaac_synthetic.isaac_dr.replay_runner import replay_with_randomization
-        from lerobot_isaac_synthetic.isaac_dr.parquet_writer import write_episodes_to_lerobot_dataset
-
-        episodes = replay_with_randomization(
-            source_dataset_path=real_dataset_path,
-            n_variants_per_episode=10,
-        )
-        write_episodes_to_lerobot_dataset(episodes, output_path=output_path)
-
-    When enabled (``enabled=True`` OR ``LEROBOT_MIMICGEN_ENABLED=1``), the full
-    MimicGen implementation would:
-
-    1. Call ``lerobot_mimicgen_bridge.operations.convert_to_mimicgen`` to convert
-       the real LeRobotDataset Parquet at ``real_dataset_path`` into MimicGen HDF5
-       format.  See ``SKILL_PATH`` for the exact API.
-    2. Run MimicGen augmentation (via ``subprocess.run`` or the
-       ``lerobot-sim-augmentation-agent``) to generate ``n_synthetic_demos``
-       demonstrations.  MimicGen requires robosuite + MuJoCo.
-    3. Call ``lerobot_mimicgen_bridge.operations.convert_from_mimicgen`` to
-       convert the MimicGen output HDF5 back to LeRobot Parquet format.
-    4. Tag all rows with ``source="mimicgen"`` in ``meta/tasks.parquet``.
-    5. Return ``Path(output_path)``.
+    Steps:
+    1. Convert real LeRobotDataset Parquet → MimicGen HDF5 (skill.parquet_to_mimicgen)
+    2. Run MimicGen subprocess to generate `n_synthetic_demos` (skill.run_mimicgen)
+    3. Convert MimicGen output HDF5 → LeRobotDataset Parquet (skill.mimicgen_to_parquet)
+    4. Return output_path
 
     Parameters
     ----------
-    real_dataset_path:
-        Path to a real LeRobotDataset directory (Parquet + MP4 format).
-    n_synthetic_demos:
-        Number of synthetic demonstrations to generate.
-    task_config:
-        Task name (str) or dict with MimicGen task definition overrides.
-    output_path:
-        Destination directory for the resulting synthetic LeRobotDataset.
-    enabled:
-        Explicit activation flag.  If False (default) AND the env var
-        ``LEROBOT_MIMICGEN_ENABLED`` is not set, raises ``NotImplementedError``.
+    real_dataset_path : path to a real LeRobotDataset directory (Parquet + MP4).
+    n_synthetic_demos : count of demos to generate.
+    task_config : task name (str) or dict with MimicGen task definition overrides.
+    output_path : destination directory for the augmented LeRobotDataset.
+    enabled : explicit activation flag (overrides env var check).
+    n_source_demos : how many source demos to seed MimicGen with.
+    fps : output dataset frame rate.
+    camera_name : MimicGen camera key to extract.
 
     Returns
     -------
-    Path
-        Absolute path to the created synthetic dataset directory.
-
-    Raises
-    ------
-    NotImplementedError
-        When the path is not enabled.  Points to the Isaac Lab DR pipeline,
-        the skill, and the agent that should be used instead.
-    ImportError
-        (Future) raised if MimicGen / robosuite are not installed.
+    Path to the created synthetic LeRobotDataset directory.
     """
-    if not (enabled or _check_enabled()):
-        raise NotImplementedError(
-            "MimicGen bridge path is deferred.\n"
-            "\n"
-            "PRIORITY ALTERNATIVE — use the Isaac Lab DR replay pipeline:\n"
-            f"  from {_DR_MODULE} import replay_with_randomization\n"
-            "  episodes = replay_with_randomization(source_dataset_path=..., n_variants_per_episode=10)\n"
-            "\n"
-            f"To enable MimicGen path: set env var {_ENABLED_ENV_VAR}=1 "
-            "and install MimicGen + robosuite.\n"
-            "\n"
-            "Recommended: invoke via the dedicated orchestration agent "
-            "(full pipeline with error recovery and dataset validation):\n"
-            f"  Task(lerobot-sim-augmentation-agent, {{...}})\n"
-            f"  Agent spec: {_AGENT_PATH}\n"
-            "\n"
-            "For the Parquet <-> MimicGen HDF5 conversion step only:\n"
-            f"  Skill spec: {_SKILL_PATH}\n"
-        )
+    _require_active(enabled)
+    ops = _load_skill_ops()
 
-    # --- Implementation placeholder (replace when enabling) ---
-    raise NotImplementedError(
-        "run_mimicgen implementation is not yet complete.  "
-        "Follow the docstring steps above to implement."
+    real_path = Path(real_dataset_path).resolve()
+    out_path = Path(output_path).resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # Work-area for intermediate HDF5 files
+    work = out_path / ".mimicgen-work"
+    work.mkdir(exist_ok=True)
+    source_hdf5 = work / "source.hdf5"
+    augmented_hdf5 = work / "augmented.hdf5"
+
+    task_name = task_config if isinstance(task_config, str) else task_config.get("name", "pick_and_place")
+
+    logger.info("Step 1/3: parquet → mimicgen hdf5 (source)")
+    r = ops.parquet_to_mimicgen(
+        dataset_path=str(real_path),
+        output_hdf5=str(source_hdf5),
+        n_source_demos=n_source_demos,
     )
+    _unwrap(r, source_hdf5)
+
+    logger.info("Step 2/3: run mimicgen subprocess (%d demos)", n_synthetic_demos)
+    r = ops.run_mimicgen(
+        source_hdf5=str(source_hdf5),
+        output_hdf5=str(augmented_hdf5),
+        n_demos=n_synthetic_demos,
+        task_config=task_config if isinstance(task_config, str) else None,
+    )
+    _unwrap(r, augmented_hdf5)
+
+    logger.info("Step 3/3: mimicgen hdf5 → parquet (augmented dataset)")
+    r = ops.mimicgen_to_parquet(
+        input_hdf5=str(augmented_hdf5),
+        output_path=str(out_path),
+        task_name=task_name,
+        fps=fps,
+        camera_name=camera_name,
+    )
+    _unwrap(r, out_path)
+
+    logger.info("MimicGen pipeline complete: %s", out_path)
+    return out_path
 
 
 def convert_real_to_mimicgen_hdf5(
     real_dataset_path: str | Path,
     output_hdf5_path: str | Path,
     enabled: bool = False,
+    n_source_demos: int = 10,
 ) -> Path:
-    """Convert a real LeRobotDataset to MimicGen HDF5 format.
+    """Convert a real LeRobotDataset (Parquet + MP4) to MimicGen HDF5 format.
 
-    Thin delegation to the ``lerobot_mimicgen_bridge`` skill.  See skill docs:
-    ``${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md``
-
-    Priority alternative: use ``isaac_dr.replay_runner.replay_with_randomization``
-    for Isaac Lab DR-based augmentation, which does not require MimicGen or MuJoCo.
-
-    This is a stub — raises ``NotImplementedError`` unless enabled via
-    ``LEROBOT_MIMICGEN_ENABLED=1`` or ``enabled=True``.
+    Thin delegation to ``lerobot_mimicgen_bridge.operations.parquet_to_mimicgen``.
     """
-    if not (enabled or _check_enabled()):
-        raise NotImplementedError(
-            f"Deferred path — invoke via skill: {_SKILL_PATH}\n"
-            f"Priority alternative: {_DR_MODULE}.replay_with_randomization"
-        )
-    raise NotImplementedError(
-        "Delegate to lerobot_mimicgen_bridge.operations.convert_to_mimicgen"
+    _require_active(enabled)
+    ops = _load_skill_ops()
+
+    out = Path(output_hdf5_path).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    r = ops.parquet_to_mimicgen(
+        dataset_path=str(Path(real_dataset_path).resolve()),
+        output_hdf5=str(out),
+        n_source_demos=n_source_demos,
     )
+    return _unwrap(r, out)
 
 
 def convert_mimicgen_hdf5_to_lerobot(
@@ -204,23 +201,27 @@ def convert_mimicgen_hdf5_to_lerobot(
     output_dataset_path: str | Path,
     source_tag: str = "mimicgen",
     enabled: bool = False,
+    task_name: str = "pick_and_place",
+    fps: int = 30,
+    camera_name: str = "agentview",
 ) -> Path:
     """Convert MimicGen output HDF5 back to LeRobotDataset Parquet format.
 
-    Thin delegation to the ``lerobot_mimicgen_bridge`` skill.  See skill docs:
-    ``${CLAUDE_CODE_ROOT}/skills/lerobot_mimicgen_bridge/SKILL.md``
-
-    Priority alternative: use ``isaac_dr.parquet_writer.write_episodes_to_lerobot_dataset``
-    for writing episodes produced by the Isaac Lab DR pipeline.
-
-    This is a stub — raises ``NotImplementedError`` unless enabled via
-    ``LEROBOT_MIMICGEN_ENABLED=1`` or ``enabled=True``.
+    Thin delegation to ``lerobot_mimicgen_bridge.operations.mimicgen_to_parquet``.
+    The ``source_tag`` is preserved for caller-side bookkeeping; the skill itself
+    tags rows via its own ``task_name`` mechanism.
     """
-    if not (enabled or _check_enabled()):
-        raise NotImplementedError(
-            f"Deferred path — invoke via skill: {_SKILL_PATH}\n"
-            f"Priority alternative: isaac_dr.parquet_writer.write_episodes_to_lerobot_dataset"
-        )
-    raise NotImplementedError(
-        "Delegate to lerobot_mimicgen_bridge.operations.convert_from_mimicgen"
+    _require_active(enabled)
+    ops = _load_skill_ops()
+
+    out = Path(output_dataset_path).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    r = ops.mimicgen_to_parquet(
+        input_hdf5=str(Path(hdf5_path).resolve()),
+        output_path=str(out),
+        task_name=task_name,
+        fps=fps,
+        camera_name=camera_name,
     )
+    logger.debug("source_tag=%s applied at caller layer", source_tag)
+    return _unwrap(r, out)
