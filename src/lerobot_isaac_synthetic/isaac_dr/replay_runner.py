@@ -472,9 +472,20 @@ def _resolve_output_path(output_path: Path | None) -> Path:
     return Path(f"datasets/dr_replay_{ts}")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Entry point.
+
+    Accepts *argv* so callers can delegate programmatically, matching the other two
+    entry points the meta CLI forwards to — ``lerobot_isaac_adapters.train.main`` and
+    ``robot_data_recorder.cli.main`` both take ``argv``. This one did not, so
+    ``lerobot_isaac_meta.cli`` calling ``replay_main(argv)`` raised
+    ``TypeError: main() takes 0 positional arguments but 1 was given``.
+
+    ``None`` falls back to ``sys.argv[1:]`` via argparse, so the console-script path
+    is unchanged.
+    """
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Resolve legacy --source_dataset_path alias
     source = args.source_dataset or args.source_dataset_path_legacy
